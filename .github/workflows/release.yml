@@ -1,0 +1,53 @@
+name: Publish version releases
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Each run reconciles all tags, including when several commits are pushed together.
+concurrency:
+  group: version-releases
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish missing versions and select Latest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          existing=$(mktemp)
+          notes=$(mktemp)
+          trap 'rm -f "$existing" "$notes"' EXIT
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[].tag_name' > "$existing"
+
+          # Use the full commit message as the release description; never rewrite tags.
+          while IFS= read -r tag; do
+            [[ "$tag" =~ $pattern ]] || continue
+            if ! grep -Fxq "$tag" "$existing"; then
+              git log -1 --format=%B "$tag^{commit}" > "$notes"
+              gh release create "$tag" --verify-tag --title "$tag" --notes-file "$notes" --latest=false
+            fi
+          done < <(git tag --list 'v*' --sort=version:refname)
+
+          # Highest published stable version wins, even when an older tag arrives later.
+          latest=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | { grep -E "$pattern" || test "$?" = 1; } | sort -V | tail -n 1)
+          if [[ -n "$latest" ]]; then
+            gh release edit "$latest" --latest
+          fi

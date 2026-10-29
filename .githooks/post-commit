@@ -1,0 +1,154 @@
+#!/bin/sh
+# Repository settings: change these when reusing the hook elsewhere.
+version_file=VERSION
+version_field=  # Empty for plain text; JSON field must be unique and on its own line.
+changelog_file=CHANGELOG.md
+
+# Stop on errors and keep recovery state inside this clone's Git directory.
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+pending=$(git rev-parse --git-path semantic-version-pending)
+head=$(git rev-parse HEAD)
+retry=${1:-}
+fail() { echo "Versioning: $*" >&2; exit 1; }
+
+# Tag only the completed commit. Never overwrite an existing version tag.
+finish_tag() {
+    tag="v$1"
+    if git show-ref --verify --quiet "refs/tags/$tag"; then
+        test "$(git rev-parse "$tag^{commit}")" = "$head" || fail "$tag already points to another commit."
+        test "$(git cat-file -t "refs/tags/$tag")" = tag || fail "$tag must be an annotated tag."
+    else
+        git log -1 --format=%B | git tag -a "$tag" -F - "$head"
+    fi
+    rm -f "$pending"
+    echo "Versioning: $tag -> $(git rev-parse --short HEAD)."
+}
+
+# Retry only the original failed commit or its amendment; skip ordinary history replay.
+if test -f "$pending"; then
+    test "$retry" = --retry || fail 'Versioning is pending. Retry with: sh .githooks/post-commit --retry'
+    previous=$(cat "$pending")
+    case "$previous" in
+        'tag '*)
+            read -r stage tag_version tag_head < "$pending"
+            test "$head" = "$tag_head" || fail 'The pending tag belongs to a different commit.'
+            finish_tag "$tag_version"
+            exit 0 ;;
+    esac
+    if test "$previous" != "$head"; then
+        test "$(git rev-parse "$previous^")" = "$(git rev-parse HEAD^)" || fail 'An earlier commit still needs versioning. Resolve it before continuing.'
+        case "$(git reflog -1 --format=%gs)" in 'commit (amend): '*) ;; *) fail 'Retry requires the original commit or its amendment.' ;; esac
+    fi
+elif test "$retry" = --retry; then
+    echo 'Versioning: no pending update.'
+    exit 0
+else
+    # Only new ordinary commits: preserve amends, merges and replayed history.
+    case "$(git reflog -1 --format=%gs)" in 'commit: '*) ;; *) exit 0 ;; esac
+    for state in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+        test ! -e "$(git rev-parse --git-path "$state")" || exit 0
+    done
+fi
+# Conventional Commits: breaking change > feature > fix/performance; other types skip.
+subject=$(git log -1 --format=%s)
+bump=$(git log -1 --format=%B | awk '
+    NR == 1 {
+        line = tolower($0)
+        if (line !~ /^[a-z]+(\([^()]+\))?!?:[[:space:]]+[^[:space:]]/) exit
+        if (line ~ /^[^:]+!:/) bump = "major"
+        else if (line ~ /^feat(\([^()]+\))?:/) bump = "minor"
+        else if (line ~ /^(fix|perf)(\([^()]+\))?:/) bump = "patch"
+        valid = 1
+    }
+    valid && /^BREAKING[ -]CHANGE:[[:space:]]+[^[:space:]]/ { bump = "major" }
+    END { print bump }
+')
+test -n "$bump" || exit 0
+
+# Mark the update before validation so pre-push blocks it if anything fails.
+printf '%s\n' "$head" > "$pending"
+trap 'echo "Versioning incomplete. Fix the reported issue, then run: sh .githooks/post-commit --retry" >&2' 0
+for path in "$version_file" "$changelog_file"; do
+    git diff --quiet -- "$path" || fail "Unstaged changes in $path; preserve them elsewhere before retrying."
+    git diff --cached --quiet -- "$path" || fail "Staged changes in $path; preserve them elsewhere before retrying."
+done
+tmp=$(git rev-parse --git-path semantic-version-work)
+mkdir -p "$tmp"
+git show "HEAD:$version_file" > "$tmp/version"
+
+# Read a version from stdin, or replace it when given the new version as an argument.
+# JSON uses one standalone field; an empty version_field selects plain VERSION text.
+version() {
+    if test -z "$version_field"; then
+        if test "$#" -eq 0; then tr -d '\r\n'; else printf '%s\n' "$1"; fi
+    else
+        awk -v field="$version_field" -v replacement="${1:-}" '
+            { sub(/\r$/, "") }
+            $0 ~ "^[[:space:]]*\"" field "\"[[:space:]]*:" {
+                value = $0
+                sub(/^[^:]*:[[:space:]]*"/, "", value)
+                sub(/"[[:space:]]*,?[[:space:]]*$/, "", value)
+                count++
+                if (replacement) sub(/:[[:space:]]*"[^"]*"/, ": \"" replacement "\"")
+            }
+            replacement { print }
+            END { if (count != 1) exit 1; if (!replacement) print value }
+        '
+    fi
+}
+old=$(git show "HEAD^:$version_file" | version) || fail 'Expected one standalone JSON version field.'
+current=$(version < "$tmp/version") || fail 'Expected one standalone JSON version field.'
+
+# Calculate from the parent commit, resetting the lower numbers for major/minor bumps.
+next=$(printf '%s\n' "$old" | awk -F. -v bump="$bump" '
+    NF != 3 || $0 !~ /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ { exit 1 }
+    { a=$1+0; b=$2+0; c=$3+0
+      if (bump=="major") { a++; b=0; c=0 }
+      else if (bump=="minor") { b++; c=0 }
+      else c++
+      printf "%.0f.%.0f.%.0f\n", a, b, c }
+') || fail "Invalid baseline version: $old"
+test "$current" = "$old" || fail "Manual version change in $version_file; expected $old."
+git show-ref --verify --quiet "refs/tags/v$next" && fail "v$next already exists; version tags are never overwritten."
+
+# Load the previous changelog (or its initial baseline) and refuse manual conflicts.
+if git cat-file -e "HEAD^:$changelog_file" 2>/dev/null; then
+    git show "HEAD^:$changelog_file" | tr -d '\r' > "$tmp/baseline"
+else
+    printf '# Changelog\n\n## %s\n\n- Initial versioning baseline.\n' "$old" > "$tmp/baseline"
+fi
+test "$(head -n 1 "$tmp/baseline")" = '# Changelog' || fail 'Changelog must start with # Changelog.'
+if git cat-file -e "HEAD:$changelog_file" 2>/dev/null; then
+    git show "HEAD:$changelog_file" | tr -d '\r' > "$tmp/current-changelog"
+    cmp -s "$tmp/baseline" "$tmp/current-changelog" || fail 'Manual changelog edits: commit them separately with docs:.'
+elif test -e "$changelog_file"; then
+    fail "Untracked $changelog_file; stage it in a docs: commit first."
+fi
+
+# Generate both files in Git's work area before touching the commit or working files.
+version "$next" < "$tmp/version" > "$tmp/new-version"
+{
+    printf '# Changelog\n\n## %s\n\n- %s\n\n' "$next" "$subject"
+    awk 'NR == 1 { next } !started && /^[[:space:]]*$/ { next } { started=1; print }' "$tmp/baseline"
+} > "$tmp/new-changelog"
+# Amend through a private index, preserving unrelated staged/unstaged changes.
+index=$(git rev-parse --git-path semantic-version-index)
+index=$(cd "$(dirname "$index")" && pwd)/$(basename "$index")
+export GIT_INDEX_FILE="$index"
+git read-tree HEAD
+version_blob=$(git hash-object -w "$tmp/new-version")
+changelog_blob=$(git hash-object -w "$tmp/new-changelog")
+git update-index --add --cacheinfo "100644,$version_blob,$version_file"
+git update-index --add --cacheinfo "100644,$changelog_blob,$changelog_file"
+# Disable hooks for the internal amend to avoid recursion and a second version bump.
+git -c core.hooksPath=/dev/null commit --amend --no-edit --quiet
+unset GIT_INDEX_FILE
+
+# Synchronize managed files, then checkpoint tag creation so a failed tag can be retried.
+git restore --source=HEAD --staged --worktree -- "$version_file" "$changelog_file"
+head=$(git rev-parse HEAD)
+printf 'tag %s %s\n' "$next" "$head" > "$pending"
+finish_tag "$next"
+rm -f "$index"
+trap - 0

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Block pushes until post-commit finishes the version and changelog update.
+pending=$(git rev-parse --git-path semantic-version-pending) || exit 1
+if test -f "$pending"; then
+    echo 'Versioning: push blocked because version finalization is pending.' >&2
+    echo 'Run: sh .githooks/post-commit --retry (use Git Bash on Windows).' >&2
+    exit 1
+fi
