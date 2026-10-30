@@ -2,6 +2,7 @@
 # Repository settings: change these when reusing the hook elsewhere.
 version_file=VERSION
 version_field=  # Empty for plain text; JSON field must be unique and on its own line.
+tag_prefix=v # Use '' for no prefix; match TAG_PREFIX in .github/workflows/release.yml.
 changelog_file=CHANGELOG.md
 # Use \n for newlines, e.g. '# Changelog\n\nAll notable changes are documented here.'
 # Match the existing changelog header; change both in a docs: commit.
@@ -17,7 +18,8 @@ fail() { echo "Versioning: $*" >&2; exit 1; }
 
 # Tag only the completed commit. Never overwrite an existing version tag.
 finish_tag() {
-    tag="v$1"
+    tag="${tag_prefix}$1"
+    git check-ref-format "refs/tags/$tag" || fail "Invalid version tag: $tag"
     if git show-ref --verify --quiet "refs/tags/$tag"; then
         test "$(git rev-parse "$tag^{commit}")" = "$head" || fail "$tag already points to another commit."
         test "$(git cat-file -t "refs/tags/$tag")" = tag || fail "$tag must be an annotated tag."
@@ -113,7 +115,9 @@ next=$(printf '%s\n' "$old" | awk -F. -v bump="$bump" '
       printf "%.0f.%.0f.%.0f\n", a, b, c }
 ') || fail "Invalid baseline version: $old"
 test "$current" = "$old" || fail "Manual version change in $version_file; expected $old."
-git show-ref --verify --quiet "refs/tags/v$next" && fail "v$next already exists; version tags are never overwritten."
+next_tag="${tag_prefix}${next}"
+git check-ref-format "refs/tags/$next_tag" || fail "Invalid version tag: $next_tag"
+git show-ref --verify --quiet "refs/tags/$next_tag" && fail "$next_tag already exists; version tags are never overwritten."
 
 # Load the previous changelog (or its initial baseline) and refuse manual conflicts.
 # Expand backslash escapes once and normalize trailing newlines.
