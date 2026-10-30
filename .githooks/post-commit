@@ -3,6 +3,7 @@
 version_file=VERSION
 version_field=  # Empty for plain text; JSON field must be unique and on its own line.
 changelog_file=CHANGELOG.md
+changelog_heading='# Changelog'  # Match the existing changelog's first line; change both in a docs: commit.
 
 # Stop on errors and keep recovery state inside this clone's Git directory.
 set -eu
@@ -116,9 +117,9 @@ git show-ref --verify --quiet "refs/tags/v$next" && fail "v$next already exists;
 if git cat-file -e "HEAD^:$changelog_file" 2>/dev/null; then
     git show "HEAD^:$changelog_file" | tr -d '\r' > "$tmp/baseline"
 else
-    printf '# Changelog\n\n## %s\n\n- Initial versioning baseline.\n' "$old" > "$tmp/baseline"
+    printf '%s\n\n## %s\n\n- Initial versioning baseline.\n' "$changelog_heading" "$old" > "$tmp/baseline"
 fi
-test "$(head -n 1 "$tmp/baseline")" = '# Changelog' || fail 'Changelog must start with # Changelog.'
+test "$(head -n 1 "$tmp/baseline")" = "$changelog_heading" || fail "Changelog must start with $changelog_heading."
 if git cat-file -e "HEAD:$changelog_file" 2>/dev/null; then
     git show "HEAD:$changelog_file" | tr -d '\r' > "$tmp/current-changelog"
     cmp -s "$tmp/baseline" "$tmp/current-changelog" || fail 'Manual changelog edits: commit them separately with docs:.'
@@ -129,7 +130,7 @@ fi
 # Generate both files in Git's work area before touching the commit or working files.
 version "$next" < "$tmp/version" > "$tmp/new-version"
 {
-    printf '# Changelog\n\n## %s\n\n- %s\n\n' "$next" "$subject"
+    printf '%s\n\n## %s\n\n- %s\n\n' "$changelog_heading" "$next" "$subject"
     awk 'NR == 1 { next } !started && /^[[:space:]]*$/ { next } { started=1; print }' "$tmp/baseline"
 } > "$tmp/new-changelog"
 # Amend through a private index, preserving unrelated staged/unstaged changes.
