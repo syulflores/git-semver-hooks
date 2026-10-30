@@ -7,6 +7,11 @@ changelog_file=CHANGELOG.md
 # Use \n for newlines, e.g. '# Changelog\n\nAll notable changes are documented here.'
 # Match the existing changelog header; change both in a docs: commit.
 changelog_heading='# Changelog\n\nAll notable changes to this project are documented here.'
+patch_types='fix perf' # Space-separated Conventional Commit types.
+minor_types='feat'
+create_tag=true # true or false; version and changelog updates always run.
+allowed_branches='main' # Space-separated exact names; empty allows all branches.
+initial_version='0.0.0' # Baseline when the parent has no version file.
 
 # Stop on errors and keep recovery state inside this clone's Git directory.
 set -eu
@@ -15,9 +20,15 @@ pending=$(git rev-parse --git-path semantic-version-pending)
 head=$(git rev-parse HEAD)
 retry=${1:-}
 fail() { echo "Versioning: $*" >&2; exit 1; }
+case "$create_tag" in true|false) ;; *) fail 'create_tag must be true or false.' ;; esac
 
 # Tag only the completed commit. Never overwrite an existing version tag.
 finish_tag() {
+    if test "$create_tag" = false; then
+        rm -f "$pending"
+        echo "Versioning: $1 -> $(git rev-parse --short HEAD) (tag disabled)."
+        return
+    fi
     tag="${tag_prefix}$1"
     git check-ref-format "refs/tags/$tag" || fail "Invalid version tag: $tag"
     if git show-ref --verify --quiet "refs/tags/$tag"; then
@@ -49,21 +60,27 @@ elif test "$retry" = --retry; then
     echo 'Versioning: no pending update.'
     exit 0
 else
+    if test -n "$allowed_branches"; then
+        branch=$(git symbolic-ref --quiet --short HEAD) || exit 0
+        case " $allowed_branches " in *" $branch "*) ;; *) exit 0 ;; esac
+    fi
     # Only new ordinary commits: preserve amends, merges and replayed history.
-    case "$(git reflog -1 --format=%gs)" in 'commit: '*) ;; *) exit 0 ;; esac
+    case "$(git reflog -1 --format=%gs)" in 'commit: '*|'commit (initial): '*) ;; *) exit 0 ;; esac
     for state in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
         test ! -e "$(git rev-parse --git-path "$state")" || exit 0
     done
 fi
 # Conventional Commits: breaking change > feature > fix/performance; other types skip.
 subject=$(git log -1 --format=%s)
-bump=$(git log -1 --format=%B | awk '
+bump=$(git log -1 --format=%B | awk -v patch_types="$patch_types" -v minor_types="$minor_types" '
     NR == 1 {
         line = tolower($0)
         if (line !~ /^[a-z]+(\([^()]+\))?!?:[[:space:]]+[^[:space:]]/) exit
+        type = line
+        sub(/[( !:].*$/, "", type)
         if (line ~ /^[^:]+!:/) bump = "major"
-        else if (line ~ /^feat(\([^()]+\))?:/) bump = "minor"
-        else if (line ~ /^(fix|perf)(\([^()]+\))?:/) bump = "patch"
+        else if (index(" " minor_types " ", " " type " ")) bump = "minor"
+        else if (index(" " patch_types " ", " " type " ")) bump = "patch"
         valid = 1
     }
     valid && /^BREAKING[ -]CHANGE:[[:space:]]+[^[:space:]]/ { bump = "major" }
@@ -80,7 +97,14 @@ for path in "$version_file" "$changelog_file"; do
 done
 tmp=$(git rev-parse --git-path semantic-version-work)
 mkdir -p "$tmp"
-git show "HEAD:$version_file" > "$tmp/version"
+if git cat-file -e "HEAD:$version_file" 2>/dev/null; then
+    git show "HEAD:$version_file" > "$tmp/version"
+elif test -z "$version_field"; then
+    test ! -e "$version_file" || fail "Untracked $version_file; commit it first."
+    printf '%s\n' "$initial_version" > "$tmp/version"
+else
+    fail "JSON version source $version_file must already exist in the commit."
+fi
 
 # Read a version from stdin, or replace it when given the new version as an argument.
 # JSON uses one standalone field; an empty version_field selects plain VERSION text.
@@ -102,7 +126,11 @@ version() {
         '
     fi
 }
-old=$(git show "HEAD^:$version_file" | version) || fail 'Expected one standalone JSON version field.'
+if git cat-file -e "HEAD^:$version_file" 2>/dev/null; then
+    old=$(git show "HEAD^:$version_file" | version) || fail 'Expected one standalone JSON version field.'
+else
+    old=$initial_version
+fi
 current=$(version < "$tmp/version") || fail 'Expected one standalone JSON version field.'
 
 # Calculate from the parent commit, resetting the lower numbers for major/minor bumps.
@@ -116,8 +144,10 @@ next=$(printf '%s\n' "$old" | awk -F. -v bump="$bump" '
 ') || fail "Invalid baseline version: $old"
 test "$current" = "$old" || fail "Manual version change in $version_file; expected $old."
 next_tag="${tag_prefix}${next}"
-git check-ref-format "refs/tags/$next_tag" || fail "Invalid version tag: $next_tag"
-git show-ref --verify --quiet "refs/tags/$next_tag" && fail "$next_tag already exists; version tags are never overwritten."
+if test "$create_tag" = true; then
+    git check-ref-format "refs/tags/$next_tag" || fail "Invalid version tag: $next_tag"
+    git show-ref --verify --quiet "refs/tags/$next_tag" && fail "$next_tag already exists; version tags are never overwritten."
+fi
 
 # Load the previous changelog (or its initial baseline) and refuse manual conflicts.
 # Expand backslash escapes once and normalize trailing newlines.
