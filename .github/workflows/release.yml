@@ -2,14 +2,15 @@ name: Publish version releases
 
 # Change these settings to customize release publishing for your repository.
 env:
+  RELEASE_BRANCHES: "main" # Space-separated exact branch names; "" allows all branches.
   TAG_PREFIX: "v" # Must match the tags created by your local versioning hook.
   RELEASE_TITLE_PREFIX: "" # Optional text before the tag in release titles.
   UPDATE_LATEST: "true" # Set to "false" to leave GitHub's Latest selection alone.
 
-# Branch triggers are configured here; tag pushes are filtered by TAG_PREFIX in the script.
+# Trigger filters cannot use env; the script checks RELEASE_BRANCHES and TAG_PREFIX.
 on:
   push:
-    branches: [main]
+    branches: ['**']
     tags: ['**'] # Accept any prefix, including none; only version tags become releases.
   workflow_dispatch:
 
@@ -36,6 +37,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # Tag pushes and manual runs bypass the branch allowlist.
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/* && -n "$RELEASE_BRANCHES" ]]; then
+            branch_allowed=false
+            read -r -a release_branches <<< "$RELEASE_BRANCHES"
+            for branch in "${release_branches[@]}"; do
+              if [[ "$GITHUB_REF_NAME" == "$branch" ]]; then
+                branch_allowed=true
+                break
+              fi
+            done
+            if [[ "$branch_allowed" == false ]]; then
+              echo "Skipping release publishing for branch: $GITHUB_REF_NAME"
+              exit 0
+            fi
+          fi
           pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
           case "$UPDATE_LATEST" in
             true|false) ;;
