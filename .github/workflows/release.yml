@@ -1,9 +1,16 @@
 name: Publish version releases
 
+# Change these settings to customize release publishing for your repository.
+env:
+  TAG_PREFIX: "v" # Must match the tags created by your local versioning hook.
+  RELEASE_TITLE_PREFIX: "" # Optional text before the tag in release titles.
+  UPDATE_LATEST: "true" # Set to "false" to leave GitHub's Latest selection alone.
+
+# Branch triggers are configured here; tag pushes are filtered by TAG_PREFIX in the script.
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['**'] # Accept any prefix, including none; only version tags become releases.
   workflow_dispatch:
 
 permissions:
@@ -29,7 +36,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          case "$UPDATE_LATEST" in
+            true|false) ;;
+            *) echo 'UPDATE_LATEST must be "true" or "false".' >&2; exit 1 ;;
+          esac
+          is_version_tag() {
+            [[ "$1" == "$TAG_PREFIX"* && "${1#"$TAG_PREFIX"}" =~ $pattern ]]
+          }
           existing=$(mktemp)
           notes=$(mktemp)
           trap 'rm -f "$existing" "$notes"' EXIT
@@ -37,17 +51,22 @@ jobs:
 
           # Use the full commit message as the release description; never rewrite tags.
           while IFS= read -r tag; do
-            [[ "$tag" =~ $pattern ]] || continue
+            is_version_tag "$tag" || continue
             if ! grep -Fxq "$tag" "$existing"; then
               git log -1 --format=%B "$tag^{commit}" > "$notes"
-              gh release create "$tag" --verify-tag --title "$tag" --notes-file "$notes" --latest=false
+              gh release create "$tag" --verify-tag --title "${RELEASE_TITLE_PREFIX}${tag}" --notes-file "$notes" --latest=false
             fi
-          done < <(git tag --list 'v*' --sort=version:refname)
+          done < <(git tag --list --sort=version:refname)
 
           # Highest published stable version wins, even when an older tag arrives later.
+          if [[ "$UPDATE_LATEST" == false ]]; then
+            exit 0
+          fi
           latest=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
-            | { grep -E "$pattern" || test "$?" = 1; } | sort -V | tail -n 1)
+            | { while IFS= read -r tag; do
+                  if is_version_tag "$tag"; then printf '%s\n' "$tag"; fi
+                done; } | sort -V | tail -n 1)
           if [[ -n "$latest" ]]; then
             gh release edit "$latest" --latest
           fi
