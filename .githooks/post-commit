@@ -12,6 +12,7 @@ minor_types='feat'
 create_tag=true # true or false; version and changelog updates always run.
 allowed_branches='main' # Space-separated exact names; empty allows all branches.
 initial_version='0.0.0' # Baseline when the parent has no version file.
+auto_sync=true # Fetch and rebuild unpublished commits on the tracking upstream.
 
 finalize_commit() (
     # Stop on errors and keep recovery state inside this clone's Git directory.
@@ -268,6 +269,44 @@ if test "${SEMVER_POST_COMMIT_LIBRARY:-}" != 1; then
     if test -d "$(git rev-parse --git-path semantic-version-sync)"; then
         echo 'Versioning: sync is active. Use git semver-sync --continue or --abort.' >&2
         exit 1
+    fi
+    case "$auto_sync" in
+        true|false) ;;
+        *) echo 'Versioning: auto_sync must be true or false.' >&2; exit 1 ;;
+    esac
+    # Sync before finalization: the newest commit has no generated metadata yet.
+    # Do not fetch during retry, amendments, merges, or history replay.
+    if test "$auto_sync" = true && test "$#" -eq 0 &&
+        test ! -f "$(git rev-parse --git-path semantic-version-pending)"; then
+        case "$(git reflog -1 --format=%gs)" in
+            'commit: '*|'commit (initial): '*)
+                branch=$(git symbolic-ref --quiet --short HEAD || :)
+                enabled=true
+                if test -n "$allowed_branches"; then
+                    case " $allowed_branches " in
+                        *" $branch "*) ;;
+                        *) enabled=false ;;
+                    esac
+                fi
+                upstream=$(git config --get "branch.$branch.remote" || :)
+                merge=$(git config --get "branch.$branch.merge" || :)
+                if test "$enabled" = true && test -n "$branch" &&
+                    test -n "$upstream" && test "$upstream" != . && test -n "$merge"; then
+                    if test -n "$(git status --porcelain)"; then
+                        echo 'Versioning: automatic sync deferred because working changes remain. Commit or stash them, then run git semver-sync before pushing.' >&2
+                    else
+                        before=$(git rev-parse HEAD)
+                        if sh "$(git rev-parse --show-toplevel)/.githooks/semver-sync"; then
+                            # Replay already finalized every rebuilt commit.
+                            test "$(git rev-parse HEAD)" = "$before" || exit 0
+                        else
+                            test ! -d "$(git rev-parse --git-path semantic-version-sync)" || exit 1
+                            echo 'Versioning: automatic sync could not finish. Finalizing locally; run git semver-sync before pushing.' >&2
+                        fi
+                    fi
+                fi
+                ;;
+        esac
     fi
     finalize_commit "$@"
 fi

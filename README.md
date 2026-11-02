@@ -42,6 +42,19 @@ git push
 
 Scopes also work, e.g. `fix(api): correct a bug`. Amends, merges and replayed commits are skipped. Pushed annotated tags are included automatically; the included GitHub Actions workflow publishes GitHub releases from version tags.
 
+With a tracking upstream configured (normally by cloning or the first `git push -u origin main`), ordinary commits automatically fetch remote changes. If another developer has pushed, the hook rebuilds your unpublished commits on top of that upstream, using its version and changelog as the baseline. For example, if remote is `1.2.4`, your local `fix:` becomes `1.2.5`; a following local `feat:` becomes `1.3.0`. Remote changelog entries are retained and local entries and unpublished tags are regenerated. This rewrites unpublished local commit IDs; published commits are never rewritten.
+
+Automatic sync requires a clean working tree after the commit, including no untracked files. If working changes remain or the remote is unavailable, versioning continues locally and prints recovery instructions. If the remote advances again before pushing, run `git semver-sync`, then `git push`. The push guard blocks stale history and conflicting tags; it cannot replace commits already selected by an in-progress push.
+
+Code conflicts pause sync for resolution:
+
+```sh
+git add <resolved-files>
+git semver-sync --continue
+```
+
+Use `git semver-sync --abort` to restore the original local commits and tags. Sync requires linear unpublished history and refuses unexpected manual version/changelog edits.
+
 ## Configuration
 
 Check the defaults below before using the hooks and change any settings needed for your project. Configuration is at the top of each file listed below.
@@ -62,6 +75,7 @@ Controls version bumps, changelog updates, and local tags. Edit the shell variab
 | `create_tag` | `true` | Exactly `true` or `false`. Set to `false` to disable local tag creation; version and changelog updates still run. |
 | `allowed_branches` | `main` | Space-separated exact branch names, such as `'main develop'`. Use `''` to allow all branches. |
 | `initial_version` | `0.0.0` | Baseline used when the parent commit has no version file. Enter a stable `X.Y.Z` version; the selected bump is applied to this baseline. |
+| `auto_sync` | `true` | Fetch the tracking upstream before ordinary commit finalization and rebuild unpublished commits when remote has advanced. Set to `false` for local-only finalization and manual `git semver-sync`. |
 
 The default version source is a root `VERSION` file containing only a stable version such as `0.0.1`:
 

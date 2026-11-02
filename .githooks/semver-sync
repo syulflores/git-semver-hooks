@@ -46,6 +46,17 @@ prepare_commit() {
     git show "$original:$version_file" > "$state/old-version"
     old=$(read_version < "$state/base-version")
     current=$(read_version < "$state/old-version")
+    # Automatic post-commit sync runs before the newest commit is finalized.
+    # Accept that commit only when both managed values still match its parent.
+    if test "$current" = "$old"; then
+        git show "$parent:$changelog_file" > "$state/parent-changelog" || fail 'Changelog missing in a parent commit.'
+        git show "$original:$changelog_file" > "$state/local-changelog" || fail 'Changelog missing in a local commit.'
+        tr -d '\r' < "$state/parent-changelog" > "$state/base-changelog"
+        tr -d '\r' < "$state/local-changelog" > "$state/old-changelog"
+        cmp -s "$state/base-changelog" "$state/old-changelog" || fail "Commit $original has manual changelog edits; refusing to discard them."
+        printf '%s\n' "$original"
+        return
+    fi
     next=$(next_version "$old" "$(bump_of "$original")") || fail 'Invalid original version.'
     test "$current" = "$next" || fail "Commit $original has unexpected version edits."
     heading=$(printf '%b' "$changelog_heading")
