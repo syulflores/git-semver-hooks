@@ -1,0 +1,341 @@
+#!/bin/sh
+# One-time setup: sh .githooks/semver-sync --install
+# Normal commit versioning and settings live in post-commit.
+set -eu
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+fail() {
+    echo "SemVer sync: $*" >&2
+    exit 1
+}
+state=$(git rev-parse --absolute-git-dir)/semantic-version-sync
+pending=$(git rev-parse --git-path semantic-version-pending)
+self=$root/.githooks/semver-sync
+case "${1:-}" in
+    --continue|--abort)
+        if test -f "$state/engine" && test "${SEMVER_ENGINE_ACTIVE:-}" != 1; then
+            SEMVER_ENGINE_ACTIVE=1 exec sh "$state/engine" "$@"
+        fi
+        ;;
+esac
+
+# Load normal versioning without executing the post-commit action. During a
+# replay use the saved copy, since checkout may replace or remove the hooks.
+post_commit_source=$root/.githooks/post-commit
+if test "${SEMVER_ENGINE_ACTIVE:-}" = 1; then
+    post_commit_source=$state/post-commit
+fi
+SEMVER_POST_COMMIT_LIBRARY=1
+. "$post_commit_source"
+unset SEMVER_POST_COMMIT_LIBRARY
+
+clean_worktree() {
+    test -z "$(git status --porcelain)" || fail 'Commit or stash working changes first (including untracked files).'
+}
+
+# Prepare a commit with the original parent and code, but without generated metadata.
+# Refuse manual managed-file edits rather than silently discarding them.
+prepare_commit() {
+    original=$1
+    if test -z "$(bump_of "$original")"; then
+        printf '%s\n' "$original"
+        return
+    fi
+    parent=$(git rev-parse "$original^")
+    git show "$parent:$version_file" > "$state/base-version" || fail 'Version source missing in a parent commit.'
+    git show "$original:$version_file" > "$state/old-version"
+    old=$(read_version < "$state/base-version")
+    current=$(read_version < "$state/old-version")
+    next=$(next_version "$old" "$(bump_of "$original")") || fail 'Invalid original version.'
+    test "$current" = "$next" || fail "Commit $original has unexpected version edits."
+    heading=$(printf '%b' "$changelog_heading")
+    printf '%s\n' "$heading" > "$state/heading"
+    heading_lines=$(wc -l < "$state/heading")
+    git show "$parent:$changelog_file" > "$state/raw-changelog" || fail 'Changelog missing in a parent commit.'
+    tr -d '\r' < "$state/raw-changelog" > "$state/base-changelog"
+    {
+        printf '%s\n\n## %s\n\n- %s\n\n' "$heading" "$next" "$(git log -1 --format=%s "$original")"
+        awk -v n="$heading_lines" 'NR<=n {next} !started && /^[[:space:]]*$/ {next} {started=1; print}' "$state/base-changelog"
+    } > "$state/expected-changelog"
+    git show "$original:$changelog_file" > "$state/raw-changelog" || fail 'Changelog missing in a local commit.'
+    tr -d '\r' < "$state/raw-changelog" > "$state/old-changelog"
+    cmp -s "$state/expected-changelog" "$state/old-changelog" || fail "Commit $original has manual changelog edits; refusing to discard them."
+    if test -z "$version_field"; then
+        cp "$state/base-version" "$state/stripped-version"
+    else
+        awk -v field="$version_field" -v replacement="$old" '
+            {sub(/\r$/, "")}
+            $0 ~ "^[[:space:]]*\"" field "\"[[:space:]]*:" {
+                sub(/:[[:space:]]*"[^"]*"/, ": \"" replacement "\"")
+            }
+            {print}
+        ' "$state/old-version" > "$state/stripped-version"
+    fi
+    (
+        export GIT_INDEX_FILE="$state/index"
+        git read-tree "$original"
+        # Restore the parent entry including its mode; JSON keeps other field edits.
+        git restore --source="$parent" --staged -- "$changelog_file" "$version_file"
+        if test -n "$version_field"; then
+            mode=$(git ls-tree "$original" -- "$version_file" | awk '{print $1}')
+            blob=$(git hash-object -w "$state/stripped-version")
+            git update-index --cacheinfo "$mode,$blob,$version_file"
+        fi
+        tree=$(git write-tree)
+        export GIT_AUTHOR_NAME="$(git log -1 --format=%an "$original")"
+        export GIT_AUTHOR_EMAIL="$(git log -1 --format=%ae "$original")"
+        export GIT_AUTHOR_DATE="$(git log -1 --format=%aI "$original")"
+        git log -1 --format=%B "$original" | git commit-tree "$tree" -p "$parent"
+    )
+}
+
+# Store progress atomically so a failed finalization can be continued or aborted.
+set_phase() {
+    printf '%s\n' "$1" > "$state/phase.new"
+    mv "$state/phase.new" "$state/phase"
+}
+
+finish_sync() {
+    branch=$(cat "$state/branch")
+    original=$(cat "$state/original")
+    tip=$(git rev-parse HEAD)
+    # Publish the result to the local branch only when all commits are rebuilt.
+    current=$(git rev-parse "refs/heads/$branch")
+    if test "$current" != "$tip"; then
+        git update-ref "refs/heads/$branch" "$tip" "$original" || fail 'Original branch moved during sync. Abort and investigate.'
+    fi
+    git -c core.hooksPath=/dev/null checkout --quiet "$branch"
+    git update-ref -d refs/semver-sync/original
+    rm -rf "$state"
+    echo 'SemVer sync complete. Run git push.'
+}
+
+run_sync() {
+    export SEMVER_SYNC_BRANCH="$(cat "$state/branch")"
+    if test -s "$state/queue"; then
+        test -z "$(git symbolic-ref --quiet --short HEAD || :)" || fail 'Sync replay must remain on its detached HEAD. Use --abort to recover.'
+    fi
+    while test -s "$state/queue"; do
+        read -r original prepared < "$state/queue"
+        phase=$(cat "$state/phase")
+        if test "$phase" = ready; then
+            printf '%s\n' "$(git rev-parse HEAD)" > "$state/before"
+            set_phase picking
+            if ! git -c core.hooksPath=/dev/null cherry-pick --allow-empty --keep-redundant-commits "$prepared"; then
+                echo 'Resolve code conflicts, git add the resolved files, then run git semver-sync --continue.' >&2
+                echo 'To cancel: git semver-sync --abort' >&2
+                exit 1
+            fi
+            set_phase finalize
+        elif test "$phase" = picking; then
+            if test -f "$(git rev-parse --git-path CHERRY_PICK_HEAD)"; then
+                git diff --quiet || fail 'Stage all resolved changes before continuing.'
+                test -z "$(git diff --name-only --diff-filter=U)" || fail 'Resolve and stage all code conflicts first.'
+                if git diff --cached --quiet; then
+                    # A resolution can retain the remote code entirely. Keep the
+                    # original commit/message so its version can still be rebuilt.
+                    git -c core.hooksPath=/dev/null commit --allow-empty -C "$prepared"
+                    git -c core.hooksPath=/dev/null cherry-pick --quit
+                else
+                    git -c core.hooksPath=/dev/null -c core.editor=true cherry-pick --continue || exit 1
+                fi
+            else
+                test "$(git rev-parse HEAD)" != "$(cat "$state/before")" || fail 'Replay did not complete. Use --abort.'
+            fi
+            set_phase finalize
+        fi
+        if test -f "$pending"; then
+            finalize_commit --retry
+        else
+            finalize_commit --replay-commit
+        fi
+        # Save the completed tip before removing the queue entry for crash recovery.
+        printf '%s\n' "$original" > "$state/completed"
+        set_phase completed
+        tail -n +2 "$state/queue" > "$state/queue.new"
+        mv "$state/queue.new" "$state/queue"
+        set_phase ready
+    done
+    finish_sync
+}
+
+start_sync() {
+    test ! -d "$state" || fail 'A sync is active. Use --continue or --abort.'
+    test ! -f "$pending" || fail 'Version finalization is pending. Run sh .githooks/post-commit --retry first.'
+    for operation in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
+        test ! -e "$(git rev-parse --git-path "$operation")" || fail 'Finish or abort the current Git operation first.'
+    done
+    clean_worktree
+    branch=$(git symbolic-ref --quiet --short HEAD) || fail 'Check out a branch first.'
+    if test -n "$allowed_branches"; then
+        case " $allowed_branches " in
+            *" $branch "*)
+                ;;
+            *)
+                fail 'This branch is not enabled in allowed_branches.'
+                ;;
+        esac
+    fi
+    remote=$(git config --get "branch.$branch.remote") || fail 'Configure a tracking upstream first.'
+    merge=$(git config --get "branch.$branch.merge") || fail 'Configure a tracking upstream first.'
+    test "$remote" != . || fail 'A remote tracking upstream is required.'
+    case "$merge" in
+        refs/heads/*)
+            ;;
+        *)
+            fail 'Upstream must be a remote branch.'
+            ;;
+    esac
+    # Fetch into private refs: local unpublished version tags must not block fetching.
+    git for-each-ref --format='delete %(refname)' refs/semver-sync/remote-heads/ refs/semver-sync/remote-tags/ | git update-ref --stdin
+    git fetch --no-tags "$remote" '+refs/heads/*:refs/semver-sync/remote-heads/*' '+refs/tags/*:refs/semver-sync/remote-tags/*'
+    target=$(git rev-parse "refs/semver-sync/remote-heads/${merge#refs/heads/}") || fail 'Upstream branch does not exist.'
+    if git merge-base --is-ancestor "$target" HEAD; then
+        echo 'SemVer sync: already includes the upstream branch.'
+        return
+    fi
+    base=$(git merge-base HEAD "$target") || fail 'Unrelated histories cannot be synced.'
+    test -z "$(git rev-list --merges "$base..HEAD")" || fail 'Unpublished merge commits are not supported. Use a linear history.'
+    # Never rewrite a commit already present on any branch of this remote.
+    for ref in $(git for-each-ref --format='%(refname)' refs/semver-sync/remote-heads/ refs/semver-sync/remote-tags/); do
+        published=$(git rev-parse "$ref^{commit}" 2>/dev/null) || continue
+        for commit in $(git rev-list "$base..HEAD"); do
+            if git merge-base --is-ancestor "$commit" "$published"; then
+                fail 'A local commit is already published on a remote branch or tag; refusing to rewrite it.'
+            fi
+        done
+    done
+    mkdir "$state"
+    cp "$self" "$state/engine"
+    cp "$post_commit_source" "$state/post-commit"
+    printf '%s\n' "$branch" > "$state/branch"
+    git rev-parse HEAD > "$state/original"
+    : > "$state/tags"
+    : > "$state/queue"
+    set_phase preparing
+    # Backup tags only when they belong to commits that will actually be replayed.
+    for tag in $(git tag --list "${tag_prefix}*"); do
+        suffix=${tag#"$tag_prefix"}
+        printf '%s\n' "$suffix" | awk '/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ {ok=1} END {exit !ok}' || continue
+        commit=$(git rev-parse "$tag^{commit}" 2>/dev/null) || continue
+        if git rev-list "$base..HEAD" | grep -Fxq "$commit"; then
+            if git show-ref --verify --quiet "refs/semver-sync/remote-tags/$tag"; then
+                # A matching name at a different commit is exactly the collision we repair.
+                remote_commit=$(git rev-parse "refs/semver-sync/remote-tags/$tag^{commit}")
+                test "$remote_commit" != "$commit" || fail 'A version tag has already published this commit. Use --abort.'
+            fi
+            printf '%s %s\n' "$tag" "$(git rev-parse "refs/tags/$tag")" >> "$state/tags"
+        fi
+    done
+    for commit in $(git rev-list --reverse "$base..HEAD"); do
+        prepared=$(prepare_commit "$commit")
+        printf '%s %s\n' "$commit" "$prepared" >> "$state/queue"
+    done
+    git update-ref refs/semver-sync/original HEAD
+    # Remove only the backed-up unpublished tags, using compare-and-swap.
+    while read -r tag oid; do
+        git update-ref -d "refs/tags/$tag" "$oid"
+    done < "$state/tags"
+    # Import remote tags after removing local collisions, without overwriting other tags.
+    for ref in $(git for-each-ref --format='%(refname)' refs/semver-sync/remote-tags/); do
+        tag=${ref#refs/semver-sync/remote-tags/}
+        oid=$(git rev-parse "$ref")
+        if git show-ref --verify --quiet "refs/tags/$tag"; then
+            test "$(git rev-parse "refs/tags/$tag")" = "$oid" || fail "Unrelated local tag $tag conflicts with remote. Use --abort."
+        else
+            printf '%s %s\n' "$tag" "$oid" >> "$state/imported-tags"
+            git update-ref "refs/tags/$tag" "$oid" ''
+        fi
+    done
+    git -c core.hooksPath=/dev/null checkout --quiet --detach "$target"
+    set_phase ready
+    exec sh "$state/engine" --continue
+}
+
+abort_sync() {
+    test -d "$state" || fail 'No sync is active.'
+    branch=$(cat "$state/branch")
+    original=$(cat "$state/original")
+    current_branch=$(git symbolic-ref --quiet --short HEAD || :)
+    case "$current_branch" in
+        ''|"$branch")
+            ;;
+        *)
+            fail 'Another branch is checked out. Return to the sync checkout before aborting.'
+            ;;
+    esac
+    # --abort explicitly discards only this replay and its conflict resolutions.
+    current=$(git rev-parse "refs/heads/$branch")
+    test "$current" = "$original" || fail 'Original branch changed; refusing to overwrite it.'
+    git -c core.hooksPath=/dev/null cherry-pick --quit 2>/dev/null || :
+    git reset --hard "$original"
+    git -c core.hooksPath=/dev/null checkout --quiet "$branch"
+    # Restore the exact original tag objects. Remove only tags on rewritten commits.
+    if test -f "$state/generated-tags"; then
+        while read -r tag oid; do
+            remove_recorded_tag "$tag" "$oid"
+        done < "$state/generated-tags"
+    fi
+    if test -f "$state/imported-tags"; then
+        while read -r tag oid; do
+            remove_recorded_tag "$tag" "$oid"
+        done < "$state/imported-tags"
+    fi
+    while read -r tag oid; do
+        current=$(git rev-parse --verify "refs/tags/$tag" 2>/dev/null || :)
+        if test -n "$current" && test "$current" != "$oid"; then
+            fail "Tag $tag changed outside this sync; refusing to overwrite it."
+        fi
+        git update-ref "refs/tags/$tag" "$oid" "$current"
+    done < "$state/tags"
+    rm -f "$pending"
+    git update-ref -d refs/semver-sync/original
+    rm -rf "$state"
+    echo 'SemVer sync aborted; original commits and tags restored.'
+}
+
+remove_recorded_tag() {
+    saved_tag=$1
+    saved_oid=$2
+    actual=$(git rev-parse --verify "refs/tags/$saved_tag" 2>/dev/null || :)
+    test -n "$actual" || return 0
+    test "$actual" = "$saved_oid" || fail "Tag $saved_tag changed outside this sync; refusing to delete it."
+    git update-ref -d "refs/tags/$saved_tag" "$saved_oid"
+}
+
+case "${1:-}" in
+    --install)
+        test ! -d "$state" || fail 'Finish or abort the active sync before installing.'
+        git config --local core.hooksPath .githooks
+        git config --local push.followTags true
+        # Recovery must remain callable even if checkout removes the tracked script.
+        git config --local alias.semver-sync '!f() { p=$(git rev-parse --git-path semantic-version-sync/engine) || return; test -f "$p" || p=.githooks/semver-sync; sh "$p" "$@"; }; f'
+        echo 'SemVer hooks and git semver-sync enabled for this clone.'
+        ;;
+    --continue)
+        test -d "$state" || fail 'No sync is active.'
+        case "$(cat "$state/phase")" in
+            preparing)
+                fail 'Preparation did not finish. Use --abort.'
+                ;;
+            completed)
+                read -r queued rest < "$state/queue" || :
+                if test "${queued:-}" = "$(cat "$state/completed")"; then
+                    tail -n +2 "$state/queue" > "$state/queue.new"
+                    mv "$state/queue.new" "$state/queue"
+                fi
+                set_phase ready
+                ;;
+        esac
+        run_sync
+        ;;
+    --abort)
+        abort_sync
+        ;;
+    '')
+        start_sync
+        ;;
+    *)
+        fail 'Usage: git semver-sync [--continue|--abort|--install]'
+        ;;
+esac

@@ -1,4 +1,5 @@
 #!/bin/sh
+set -eu
 # User-facing messages: use \n for additional lines.
 pending_message='Versioning: push blocked because version finalization is pending.'
 retry_message='Run: sh .githooks/post-commit --retry (use Git Bash on Windows).'
@@ -10,3 +11,45 @@ if test -f "$pending"; then
     printf '%b\n' "$retry_message" >&2
     exit 1
 fi
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+state=$(git rev-parse --absolute-git-dir)/semantic-version-sync
+fail() {
+    echo "Versioning: $*" >&2
+    exit 1
+}
+
+check_push() {
+    test ! -d "$state" || fail 'Push blocked while sync is active. Use git semver-sync --continue or --abort.'
+    remote=$2
+    advertised=$(git rev-parse --git-path "semantic-version-push.$$")
+    trap 'rm -f "$advertised"' 0
+    git ls-remote --heads --tags "$remote" > "$advertised" || fail 'Cannot check the push destination.'
+    while read -r local_ref local_oid remote_ref remote_oid; do
+        # Deleting a ref does not publish versioned work.
+        case "$local_oid" in
+            *[!0]*)
+                ;;
+            *)
+                continue
+                ;;
+        esac
+        actual=$(awk -v ref="$remote_ref" '$2==ref {print $1}' "$advertised")
+        case "$remote_ref" in
+            refs/heads/*)
+                if test -n "$actual"; then
+                    git merge-base --is-ancestor "$actual" "$local_oid" 2>/dev/null ||
+                        fail 'Push blocked: remote history has advanced or diverged. Run git semver-sync, then git push. Sync uses your tracking upstream; it must match this destination.'
+                fi
+                ;;
+            refs/tags/*)
+                if test -n "$actual" && test "$actual" != "$local_oid"; then
+                    fail "Push blocked: ${remote_ref#refs/tags/} already exists remotely. Run git semver-sync before pushing."
+                fi
+                ;;
+        esac
+    done
+}
+
+check_push "$@"
