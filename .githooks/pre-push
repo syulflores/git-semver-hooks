@@ -21,7 +21,7 @@ fail() {
 }
 
 check_push() {
-    test ! -d "$state" || fail 'Push blocked while sync is active. Use git semver-sync --continue or --abort.'
+    test ! -d "$state" || fail 'Push blocked while sync is active. Resolve and stage conflicts, or run git semver-sync to resume; use git semver-sync --abort to cancel.'
     remote=$2
     advertised=$(git rev-parse --git-path "semantic-version-push.$$")
     trap 'rm -f "$advertised"' 0

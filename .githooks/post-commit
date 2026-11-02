@@ -267,7 +267,7 @@ read_version() {
 if test "${SEMVER_POST_COMMIT_LIBRARY:-}" != 1; then
     set -eu
     if test -d "$(git rev-parse --git-path semantic-version-sync)"; then
-        echo 'Versioning: sync is active. Use git semver-sync --continue or --abort.' >&2
+        echo 'Versioning: sync is active. Resolve and stage conflicts, or run git semver-sync to resume; use git semver-sync --abort to cancel.' >&2
         exit 1
     fi
     case "$auto_sync" in

@@ -133,7 +133,8 @@ run_sync() {
             printf '%s\n' "$(git rev-parse HEAD)" > "$state/before"
             set_phase picking
             if ! git -c core.hooksPath=/dev/null cherry-pick --allow-empty --keep-redundant-commits "$prepared"; then
-                echo 'Resolve code conflicts, git add the resolved files, then run git semver-sync --continue.' >&2
+                echo 'Resolve code conflicts in your merge tool and stage the resolved files. Sync resumes automatically after the last conflict is staged.' >&2
+                echo 'If your tool does not run Git hooks, run git semver-sync to resume.' >&2
                 echo 'To cancel: git semver-sync --abort' >&2
                 exit 1
             fi
@@ -344,6 +345,9 @@ case "${1:-}" in
         abort_sync
         ;;
     '')
+        if test -d "$state"; then
+            exec sh "$state/engine" --continue
+        fi
         start_sync
         ;;
     *)

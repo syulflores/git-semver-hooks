@@ -17,7 +17,7 @@ Local Git hooks that use Conventional Commit messages to update a version and `C
 3. On Linux/macOS, if the hooks are not executable, run:
 
    ```sh
-   chmod +x .githooks/post-commit .githooks/pre-push
+   chmod +x .githooks/post-commit .githooks/pre-push .githooks/post-index-change
    ```
 
 Each contributor only needs to run step 2 once when they first clone your project, not after every pull. A new clone requires running it again.
@@ -46,12 +46,9 @@ With a tracking upstream configured (normally by cloning or the first `git push 
 
 Automatic sync requires a clean working tree after the commit, including no untracked files. If working changes remain or the remote is unavailable, versioning continues locally and prints recovery instructions. If the remote advances again before pushing, run `git semver-sync`, then `git push`. The push guard blocks stale history and conflicting tags; it cannot replace commits already selected by an in-progress push.
 
-Code conflicts pause sync for resolution:
+Code conflicts pause sync for resolution. Resolve the files in your merge manager and stage them (or run `git add <resolved-files>`). Staging the last resolved conflict automatically resumes sync, rebuilds the versions and tags, and returns you to your branch. You can then run `git push` normally. If another replayed commit conflicts, resolve and stage that set of conflicts too.
 
-```sh
-git add <resolved-files>
-git semver-sync --continue
-```
+Merge tools must run Git hooks when staging. If yours bypasses hooks, run `git semver-sync` again to resume; `--continue` remains supported but is optional. Staging the final resolution completes the replayed commit immediately, so review the resolution before staging it.
 
 Use `git semver-sync --abort` to restore the original local commits and tags. Sync requires linear unpublished history and refuses unexpected manual version/changelog edits.
 
