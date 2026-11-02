@@ -12,7 +12,7 @@ minor_types='feat'
 create_tag=true # true or false; version and changelog updates always run.
 allowed_branches='main' # Space-separated exact names; empty allows all branches.
 initial_version='0.0.0' # Baseline when the parent has no version file.
-auto_sync=true # Fetch and rebuild unpublished commits on the tracking upstream.
+auto_sync=true # Check the tracking branch; run full sync only when remote commits are missing.
 
 finalize_commit() (
     # Stop on errors and keep recovery state inside this clone's Git directory.
@@ -292,7 +292,24 @@ if test "${SEMVER_POST_COMMIT_LIBRARY:-}" != 1; then
                 merge=$(git config --get "branch.$branch.merge" || :)
                 if test "$enabled" = true && test -n "$branch" &&
                     test -n "$upstream" && test "$upstream" != . && test -n "$merge"; then
-                    if test -n "$(git status --porcelain)"; then
+                    # Fetch only the tracking branch, with no automatic tag following.
+                    # Full sync fetches tags only when remote history is missing locally.
+                    check_ref=refs/semver-sync/commit-upstream
+                    needs_sync=false
+                    case "$merge" in
+                        refs/heads/*)
+                            if git fetch --quiet --no-tags --no-prune --no-prune-tags --no-recurse-submodules --refmap= "$upstream" "+$merge:$check_ref"; then
+                                if ! git merge-base --is-ancestor "$check_ref" HEAD; then
+                                    needs_sync=true
+                                fi
+                            else
+                                echo 'Versioning: upstream check failed. Finalizing locally; run git semver-sync before pushing.' >&2
+                            fi
+                            ;;
+                    esac
+                    if test "$needs_sync" = false; then
+                        : # Already includes upstream; finalize locally without full sync.
+                    elif test -n "$(git status --porcelain)"; then
                         echo 'Versioning: automatic sync deferred because working changes remain. Commit or stash them, then run git semver-sync before pushing.' >&2
                     else
                         before=$(git rev-parse HEAD)

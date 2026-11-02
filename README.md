@@ -42,9 +42,11 @@ git push
 
 Scopes also work, e.g. `fix(api): correct a bug`. Amends, merges and replayed commits are skipped. Pushed annotated tags are included automatically; the included GitHub Actions workflow publishes GitHub releases from version tags.
 
-With a tracking upstream configured (normally by cloning or the first `git push -u origin main`), ordinary commits automatically fetch remote changes. If another developer has pushed, the hook rebuilds your unpublished commits on top of that upstream, using its version and changelog as the baseline. For example, if remote is `1.2.4`, your local `fix:` becomes `1.2.5`; a following local `feat:` becomes `1.3.0`. Remote changelog entries are retained and local entries and unpublished tags are regenerated. This rewrites unpublished local commit IDs; published commits are never rewritten.
+With a tracking upstream configured (normally by cloning or the first `git push -u origin main`), ordinary commits fetch only the tracking branch without fetching tags, then check whether its history is already included locally. If remote commits are missing, the hook automatically runs full sync before version finalization. Sync rebuilds your unpublished commits on top of that upstream, using its version and changelog as the baseline. For example, if remote is `1.2.4`, your local `fix:` becomes `1.2.5`; a following local `feat:` becomes `1.3.0`. Remote changelog entries are retained and local entries and unpublished tags are regenerated. This rewrites unpublished local commit IDs; published commits are never rewritten.
 
-Automatic sync requires a clean working tree after the commit, including no untracked files. If working changes remain or the remote is unavailable, versioning continues locally and prints recovery instructions. If the remote advances again before pushing, run `git semver-sync`, then `git push`. The push guard blocks stale history and conflicting tags; it cannot replace commits already selected by an in-progress push.
+Sync requires a clean working tree, including no untracked files. It retains temporary remote references between fetches, updates changed references, and prunes deleted remote references without deleting your local version tags. Git still checks the remote tag list during sync; there is no reliable "tags since the last pull" filter. The ordinary commit check fetches no tags. Full sync checks the tag list only when remote branch history is missing locally. Changes made only to remote tags are checked during explicit sync or push, not by the branch-only commit check. Set `auto_sync=false` for local-only commits and run `git semver-sync` before pushing when needed.
+
+The push guard blocks stale history and conflicting tags; run `git semver-sync`, then `git push` if blocked. It cannot replace commits already selected by an in-progress push. If working changes remain after the commit or the remote is unavailable, automatic sync defers, finalizes locally, and prints recovery instructions. Code conflicts pause sync for resolution before version finalization.
 
 Code conflicts pause sync for resolution. Resolve the files in your merge manager and stage them (or run `git add <resolved-files>`). Staging the last resolved conflict automatically resumes sync, rebuilds the versions and tags, and returns you to your branch. You can then run `git push` normally. If another replayed commit conflicts, resolve and stage that set of conflicts too.
 
@@ -72,7 +74,7 @@ Controls version bumps, changelog updates, and local tags. Edit the shell variab
 | `create_tag` | `true` | Exactly `true` or `false`. Set to `false` to disable local tag creation; version and changelog updates still run. |
 | `allowed_branches` | `main` | Space-separated exact branch names, such as `'main develop'`. Use `''` to allow all branches. |
 | `initial_version` | `0.0.0` | Baseline used when the parent commit has no version file. Enter a stable `X.Y.Z` version; the selected bump is applied to this baseline. |
-| `auto_sync` | `true` | Fetch the tracking upstream before ordinary commit finalization and rebuild unpublished commits when remote has advanced. Set to `false` for local-only finalization and manual `git semver-sync`. |
+| `auto_sync` | `true` | Fetch only the tracking branch before ordinary commit finalization; run full sync when remote commits are missing locally. Set to `false` for local-only finalization and manual `git semver-sync`. |
 
 The default version source is a root `VERSION` file containing only a stable version such as `0.0.1`:
 

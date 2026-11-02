@@ -199,8 +199,8 @@ start_sync() {
             ;;
     esac
     # Fetch into private refs: local unpublished version tags must not block fetching.
-    git for-each-ref --format='delete %(refname)' refs/semver-sync/remote-heads/ refs/semver-sync/remote-tags/ | git update-ref --stdin
-    git fetch --no-tags "$remote" '+refs/heads/*:refs/semver-sync/remote-heads/*' '+refs/tags/*:refs/semver-sync/remote-tags/*'
+    # Retain unchanged refs and prune remote deletions only in these private namespaces.
+    git fetch --quiet --prune --no-tags "$remote" '+refs/heads/*:refs/semver-sync/remote-heads/*' '+refs/tags/*:refs/semver-sync/remote-tags/*'
     target=$(git rev-parse "refs/semver-sync/remote-heads/${merge#refs/heads/}") || fail 'Upstream branch does not exist.'
     if git merge-base --is-ancestor "$target" HEAD; then
         echo 'SemVer sync: already includes the upstream branch.'
