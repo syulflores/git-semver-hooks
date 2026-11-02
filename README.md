@@ -5,12 +5,14 @@ Local Git hooks that use Conventional Commit messages to update a version and `C
 ## Installation
 
 1. Copy all files and folders into your project's repository root, including hidden `.githooks` and `.github` folders. **Skip `README.md` and `.git`.** Merge existing files instead of overwriting them.
-2. Open a terminal in your project's repository root and run:
+2. Open Git Bash or PowerShell in your project's repository root and run:
 
    ```sh
-   git config --local core.hooksPath .githooks
-   git config --local push.followTags true
+   git config --local alias.semver-sync '!sh .githooks/semver-sync'
+   git semver-sync --install
    ```
+
+   This enables the hooks, automatic annotated-tag pushing, and the `git semver-sync` recovery command for this clone.
 
 3. On Linux/macOS, if the hooks are not executable, run:
 
