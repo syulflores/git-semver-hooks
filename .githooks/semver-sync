@@ -34,7 +34,13 @@ clean_worktree() {
 }
 
 # Prepare a commit with the original parent and code, but without generated metadata.
-# Refuse manual managed-file edits rather than silently discarding them.
+# Preserve unexpected metadata edits with a warning rather than discarding them.
+preserve_manual_commit() {
+    echo "SemVer sync: warning: commit $original has manual version/changelog edits; preserving them without automatic versioning or tagging. Metadata merge conflicts may need resolution." >&2
+    printf '%s\n' "$original" >> "$state/manual-commits"
+    printf '%s\n' "$original"
+}
+
 prepare_commit() {
     original=$1
     if test -z "$(bump_of "$original")"; then
@@ -42,35 +48,35 @@ prepare_commit() {
         return
     fi
     parent=$(git rev-parse "$original^")
-    git show "$parent:$version_file" > "$state/base-version" || fail 'Version source missing in a parent commit.'
-    git show "$original:$version_file" > "$state/old-version"
-    old=$(read_version < "$state/base-version")
-    current=$(read_version < "$state/old-version")
+    git show "$parent:$version_file" > "$state/base-version" 2>/dev/null || { preserve_manual_commit; return; }
+    git show "$original:$version_file" > "$state/old-version" 2>/dev/null || { preserve_manual_commit; return; }
+    old=$(read_version < "$state/base-version") || { preserve_manual_commit; return; }
+    current=$(read_version < "$state/old-version") || { preserve_manual_commit; return; }
     # Automatic post-commit sync runs before the newest commit is finalized.
     # Accept that commit only when both managed values still match its parent.
     if test "$current" = "$old"; then
-        git show "$parent:$changelog_file" > "$state/parent-changelog" || fail 'Changelog missing in a parent commit.'
-        git show "$original:$changelog_file" > "$state/local-changelog" || fail 'Changelog missing in a local commit.'
+        git show "$parent:$changelog_file" > "$state/parent-changelog" 2>/dev/null || { preserve_manual_commit; return; }
+        git show "$original:$changelog_file" > "$state/local-changelog" 2>/dev/null || { preserve_manual_commit; return; }
         tr -d '\r' < "$state/parent-changelog" > "$state/base-changelog"
         tr -d '\r' < "$state/local-changelog" > "$state/old-changelog"
-        cmp -s "$state/base-changelog" "$state/old-changelog" || fail "Commit $original has manual changelog edits; refusing to discard them."
+        cmp -s "$state/base-changelog" "$state/old-changelog" || { preserve_manual_commit; return; }
         printf '%s\n' "$original"
         return
     fi
-    next=$(next_version "$old" "$(bump_of "$original")") || fail 'Invalid original version.'
-    test "$current" = "$next" || fail "Commit $original has unexpected version edits."
+    next=$(next_version "$old" "$(bump_of "$original")") || { preserve_manual_commit; return; }
+    test "$current" = "$next" || { preserve_manual_commit; return; }
     heading=$(printf '%b' "$changelog_heading")
     printf '%s\n' "$heading" > "$state/heading"
     heading_lines=$(wc -l < "$state/heading")
-    git show "$parent:$changelog_file" > "$state/raw-changelog" || fail 'Changelog missing in a parent commit.'
+    git show "$parent:$changelog_file" > "$state/raw-changelog" 2>/dev/null || { preserve_manual_commit; return; }
     tr -d '\r' < "$state/raw-changelog" > "$state/base-changelog"
     {
         printf '%s\n\n## %s\n\n- %s\n\n' "$heading" "$next" "$(git log -1 --format=%s "$original")"
         awk -v n="$heading_lines" 'NR<=n {next} !started && /^[[:space:]]*$/ {next} {started=1; print}' "$state/base-changelog"
     } > "$state/expected-changelog"
-    git show "$original:$changelog_file" > "$state/raw-changelog" || fail 'Changelog missing in a local commit.'
+    git show "$original:$changelog_file" > "$state/raw-changelog" 2>/dev/null || { preserve_manual_commit; return; }
     tr -d '\r' < "$state/raw-changelog" > "$state/old-changelog"
-    cmp -s "$state/expected-changelog" "$state/old-changelog" || fail "Commit $original has manual changelog edits; refusing to discard them."
+    cmp -s "$state/expected-changelog" "$state/old-changelog" || { preserve_manual_commit; return; }
     if test -z "$version_field"; then
         cp "$state/base-version" "$state/stripped-version"
     else
@@ -156,7 +162,9 @@ run_sync() {
             fi
             set_phase finalize
         fi
-        if test -f "$pending"; then
+        if test -f "$state/manual-commits" && grep -Fxq "$original" "$state/manual-commits"; then
+            echo 'SemVer sync: warning: manual version/changelog edits retained; automatic versioning and tagging skipped for this commit.' >&2
+        elif test -f "$pending"; then
             finalize_commit --retry
         else
             finalize_commit --replay-commit

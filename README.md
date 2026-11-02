@@ -52,7 +52,7 @@ Code conflicts pause sync for resolution. Resolve the files in your merge manage
 
 Merge tools must run Git hooks when staging. If yours bypasses hooks, run `git semver-sync` again to resume; `--continue` remains supported but is optional. Staging the final resolution completes the replayed commit immediately, so review the resolution before staging it.
 
-Use `git semver-sync --abort` to restore the original local commits and tags. Sync requires linear unpublished history and refuses unexpected manual version/changelog edits.
+Use `git semver-sync --abort` to restore the original local commits and tags. Sync requires linear unpublished history. Manual version/changelog edits produce a warning and are preserved; resolve any resulting merge conflicts normally.
 
 ## Configuration
 
@@ -112,7 +112,7 @@ Nested fields work with the same settings, regardless of depth:
 
 Use the field name only (`version`), not a dotted path (`app.release.version`). Exactly one matching field is allowed in the file. For a differently named key, set `version_field` to that name; for a different file location, change `version_file` to its repository-relative path.
 
-Commit the chosen version file and hook settings in a `chore:` commit before making version-bumping commits: the hook reads its baseline from the parent commit. Keep versions in `X.Y.Z` format and let the hook manage version/changelog updates; commit manual changelog edits separately with `docs:`.
+Commit the chosen version file and hook settings in a `chore:` commit before making version-bumping commits: the hook reads its baseline from the parent commit. Keep versions in `X.Y.Z` format. Manual version/changelog edits are allowed with a warning: the hook preserves them and skips automatic version/changelog generation and tagging for that commit. Pending working changes in these files also warn and skip automatic versioning so your edits remain intact. Unrelated JSON fields do not count as manual version edits.
 
 ### `.githooks/pre-push`
 
