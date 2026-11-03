@@ -372,8 +372,14 @@ prepare_release() {
         printf '## %s\n' "$next"
         for group in breaking features fixes performance; do
             test -s "$state/$group" || continue
-            case "$group" in breaking) title='Breaking changes' ;; features) title=Features ;; fixes) title='Bug fixes' ;; performance) title='Performance improvements' ;; esac
-            printf '\n### %s\n\n' "$title"
+            case "$group" in
+                breaking) title=${changelog_breaking_title-} ;;
+                features) title=${changelog_features_title-} ;;
+                fixes) title=${changelog_fixes_title-} ;;
+                performance) title=${changelog_performance_title-} ;;
+            esac
+            printf '\n'
+            if test -n "$title"; then printf '### %s\n\n' "$title"; fi
             cat "$state/$group"
         done
     } > "$state/notes"

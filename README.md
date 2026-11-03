@@ -40,7 +40,7 @@ Ordinary `git push` does not guarantee an atomic branch-and-tag update. Use `git
 | Valid Conventional Commit with `!` or a `BREAKING CHANGE:` footer | Major |
 | `docs: ...`, `chore: ...`, ordinary messages | None by default |
 
-Scopes work, for example `fix(api): correct a bug`. Notes group qualifying subjects under Breaking changes, Features, Bug fixes, and Performance improvements. Docs-only commits produce no release unless a release draft already exists; in that case its tag moves to the latest unpublished commit.
+Scopes work, for example `fix(api): correct a bug`. Notes contain qualifying subjects as bullet points without category headings by default. Set the optional category titles in `.githooks/semver.conf` to add headings. Docs-only commits produce no release unless a release draft already exists; in that case its tag moves to the latest unpublished commit.
 
 ## Synchronization and conflicts
 
@@ -94,11 +94,17 @@ Edit shell variables in `.githooks/semver.conf`. Use quotes for spaces and `''` 
 | `tag_prefix` | `v` | Must match `TAG_PREFIX` in the release workflow. |
 | `changelog_file` | `CHANGELOG.md` | Repository-relative changelog path. |
 | `changelog_heading` | Template heading | Literal `\n` separates lines; must match the file header. |
+| `changelog_breaking_title` | Empty | Optional heading for breaking changes. |
+| `changelog_features_title` | Empty | Optional heading for features. |
+| `changelog_fixes_title` | Empty | Optional heading for bug fixes. |
+| `changelog_performance_title` | Empty | Optional heading for performance improvements. |
 | `patch_types` | `fix perf` | Space-separated patch commit types. |
 | `minor_types` | `feat` | Space-separated minor commit types. |
 | `allowed_branches` | `main` | Exact names separated by spaces; empty enables all branches. |
 | `auto_continue` | `true` | Automatically resume paused synchronization when all conflicts are staged and no unstaged changes remain; `false` requires `--continue`. |
 | `initial_version` | `0.0.0` | Baseline when no version exists. |
+
+For example, set `changelog_fixes_title='Bug fixes'` to include `### Bug fixes` above fix entries. Leave a title empty to omit that heading. Headings only appear when their category has entries.
 
 Plain-text version files contain only `X.Y.Z`. For JSON, set `version_file=manifest.json` and `version_field=version`. The field must appear exactly once on its own line:
 
