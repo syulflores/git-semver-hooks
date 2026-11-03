@@ -1,16 +1,11 @@
 #!/bin/sh
-# Resume paused sync when a merge tool stages the last resolved conflict.
+# Resume this tool's paused rebase when a resolver stages the final conflict.
 set -eu
-# Internal index writes must never recursively continue the replay.
 test "${SEMVER_ENGINE_ACTIVE:-}" != 1 || exit 0
 test -z "${GIT_INDEX_FILE:-}" || exit 0
-state=$(git rev-parse --absolute-git-dir)/semantic-version-sync
+gitdir=$(git rev-parse --absolute-git-dir)
+state=$gitdir/semver-release
 test -f "$state/engine" && test -f "$state/phase" || exit 0
-test "$(cat "$state/phase")" = picking || exit 0
-test -f "$(git rev-parse --git-path CHERRY_PICK_HEAD)" || exit 0
-test ! -e "$(git rev-parse --git-path index.lock)" || exit 0
-export SEMVER_ENGINE_ACTIVE=1
-test -z "$(git diff --name-only --diff-filter=U)" || exit 0
-git diff --quiet || exit 0
-echo 'SemVer sync: all conflicts staged; continuing automatically.'
-sh "$state/engine" --continue
+test "$(cat "$state/phase")" = rebase || exit 0
+test ! -d "$gitdir/semver-command-lock" || exit 0
+sh "$state/engine" --auto-continue

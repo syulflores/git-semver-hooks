@@ -3,7 +3,7 @@ name: Publish version releases
 # Change these settings to customize release publishing for your repository.
 env:
   RELEASE_BRANCHES: "main" # Space-separated exact branch names; "" allows all branches.
-  TAG_PREFIX: "v" # Must match the tags created by your local versioning hook.
+  TAG_PREFIX: "v" # Must match tag_prefix in .githooks/semver.conf.
   RELEASE_TITLE_PREFIX: "" # Optional text before the tag in release titles.
   UPDATE_LATEST: "true" # Set to "false" to leave GitHub's Latest selection alone.
 
@@ -65,11 +65,11 @@ jobs:
           trap 'rm -f "$existing" "$notes"' EXIT
           gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[].tag_name' > "$existing"
 
-          # Use the full commit message as the release description; never rewrite tags.
+          # New release tags contain the complete grouped release notes.
           while IFS= read -r tag; do
             is_version_tag "$tag" || continue
             if ! grep -Fxq "$tag" "$existing"; then
-              git log -1 --format=%B "$tag^{commit}" > "$notes"
+              git for-each-ref --format='%(contents)' "refs/tags/$tag" > "$notes"
               gh release create "$tag" --verify-tag --title "${RELEASE_TITLE_PREFIX}${tag}" --notes-file "$notes" --latest=false
             fi
           done < <(git tag --list --sort=version:refname)
