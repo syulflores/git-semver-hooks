@@ -23,6 +23,18 @@ Then run only `git semver --install` once per clone after adding or pulling the 
 
 The installer enables `post-commit`, `pre-push`, `post-index-change`, automatic annotated-tag pushing, and a recovery-aware `git semver` alias. No wrapper, PowerShell script, profile change, or per-terminal setup is needed. New clones require installation again. Git supplies the shell for aliases even when `sh` is absent from PowerShell's PATH.
 
+## Uninstall
+
+```sh
+git semver --uninstall
+```
+
+Restores the previous local Git settings saved by `--install` and removes the setup alias. Settings changed after installation are kept. Reinstalling preserves the original backup. Finish or abort any active synchronization first.
+
+Installations made before backup support remove only recognized local SemVer settings; their previous values cannot be recovered automatically. Global settings are unchanged. If a restored or inherited `core.hooksPath=.githooks` would keep these hooks active, uninstall disables hooks with a local null-device override (`/dev/null`, or `nul` with Git for Windows).
+
+Files, commits, tags, and local release records are retained. To remove the shared automation files too, remove `.githooks` and `.github/workflows/release.yml` manually, preserving any unrelated hooks or workflow actions. The GitHub release workflow remains active until removed. To enable hooks again, repeat the installation steps.
+
 ## Daily workflow
 
 ```sh
@@ -87,6 +99,7 @@ If an ordinary push published the branch but rejected the tag, run `git semver -
 git semver                 # Show help
 git semver --help
 git semver --install       # Enable hooks for this clone
+git semver --uninstall     # Restore local Git settings and disable these hooks
 git semver --sync          # Synchronize and refresh the release draft; do not push
 git semver --continue      # Resume the interrupted operation
 git semver --abort         # Cancel the interrupted operation

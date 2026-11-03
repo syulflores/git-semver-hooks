@@ -1,5 +1,5 @@
 #!/bin/sh
-# Manual installation, synchronization, and recovery commands.
+# Manual installation, uninstallation, synchronization, and recovery commands.
 set -eu
 root=$(git rev-parse --show-toplevel)
 cd "$root"
@@ -26,7 +26,84 @@ semver_init
 case "${1:-}" in ''|--help) ;; *) semver_lock "${1:-}" ;; esac
 
 usage() {
-    echo 'Usage: git semver [--install|--sync|--continue|--abort|--help]'
+    echo 'Usage: git semver [--install|--uninstall|--sync|--continue|--abort|--help]'
+}
+
+# Configuration belongs to the common Git directory, including in worktrees.
+install_dir=$(cd "$(git rev-parse --git-common-dir)" && pwd)/semver-install
+install_keys='alias.semver core.hooksPath semver.enabled push.followTags'
+installed_alias='!f() { p=$(git rev-parse --git-path semver-release/engine) || return; test -f "$p" || p=.githooks/semver; sh "$p" "$@"; }; f'
+
+installed_value() {
+    case "$1" in
+        alias.semver) printf '%s\n' "$installed_alias" ;;
+        core.hooksPath) echo .githooks ;;
+        *) echo true ;;
+    esac
+}
+
+unset_local() {
+    if git config --local --unset-all "$1"; then :
+    else test "$?" -eq 5 || fail "Cannot remove local setting $1."; fi
+}
+
+save_install_config() {
+    # Reinstallation must retain the original baseline. NUL records preserve
+    # empty, multiline, and repeated values without evaluating configuration.
+    if test -d "$install_dir"; then
+        test -f "$install_dir/complete" || fail 'Installation backup is incomplete; inspect it before reinstalling.'
+        return 0
+    fi
+    mkdir "$install_dir"
+    for key in $install_keys; do
+        if git config --local --null --get-all "$key" > "$install_dir/$key"; then :
+        else test "$?" -eq 1 || fail "Cannot save local setting $key."; fi
+    done
+    # The documented bootstrap alias is part of setup, not a previous command.
+    case "$(git config --local --get-all alias.semver || :)" in
+        '!sh .githooks/semver'|"$installed_alias"|'!f() { if test -f .githooks/semver; then sh .githooks/semver "$@"; fi; }; f')
+            : > "$install_dir/alias.semver" ;;
+    esac
+    : > "$install_dir/complete"
+}
+
+uninstall() {
+    test "$#" -eq 1 || fail 'Unexpected uninstall arguments.'
+    test ! -d "$state" || fail 'Finish or abort the active operation before uninstalling.'
+    test ! -d "$gitdir/semantic-version-sync" && test ! -f "$gitdir/semantic-version-pending" ||
+        fail 'Finish recovery with the old hooks before uninstalling.'
+    if test -d "$install_dir"; then
+        test -f "$install_dir/complete" || fail 'Installation backup is incomplete; inspect it before uninstalling.'
+        for key in $install_keys; do
+            test -f "$install_dir/$key" || fail "Missing installation backup for $key."
+        done
+    else
+        echo 'SemVer: no installation backup; removing recognized local settings only.'
+    fi
+    for key in $install_keys; do
+        current=$(git config --local --get-all "$key" || :)
+        expected=$(installed_value "$key")
+        # Leave settings edited since installation alone.
+        if test "$current" != "$expected"; then
+            if test -n "$current"; then echo "SemVer: keeping changed local setting $key."; fi
+            continue
+        fi
+        unset_local "$key"
+        if test -s "$install_dir/$key"; then
+            xargs -0 -n 1 git config --local --add "$key" < "$install_dir/$key"
+        fi
+    done
+    # A global/conditional hooksPath can otherwise re-enable these same hooks.
+    if test "$(git config --get core.hooksPath || :)" = .githooks; then
+        git config --local core.hooksPath /dev/null
+        echo 'SemVer: inherited .githooks path disabled with a local null-device hooksPath.'
+    fi
+    if test -d "$install_dir"; then
+        for key in $install_keys; do rm -f "$install_dir/$key"; done
+        rm -f "$install_dir/complete"
+        rmdir "$install_dir"
+    fi
+    echo 'SemVer hooks uninstalled for this clone. Files, commits, tags, and release records are retained.'
 }
 
 load_transaction() {
@@ -197,14 +274,16 @@ case "${1:-}" in
         esac
         if test -z "$existing" && git --list-cmds=main,others | grep -Fxq semver; then fail 'A git-semver command already exists.'; fi
         hooks=$(git config --get core.hooksPath || :)
-        case "$hooks" in ''|.githooks) ;; *) fail 'An existing hooksPath needs to be integrated manually.' ;; esac
-        git config --local alias.semver '!f() { p=$(git rev-parse --git-path semver-release/engine) || return; test -f "$p" || p=.githooks/semver; sh "$p" "$@"; }; f'
-        git config --local core.hooksPath .githooks
-        git config --local semver.enabled true
-        git config --local push.followTags true
+        case "$hooks" in ''|.githooks|/dev/null|nul) ;; *) fail 'An existing hooksPath needs to be integrated manually.' ;; esac
+        save_install_config
+        git config --local --replace-all alias.semver "$installed_alias"
+        git config --local --replace-all core.hooksPath .githooks
+        git config --local --replace-all semver.enabled true
+        git config --local --replace-all push.followTags true
         chmod +x .githooks/pre-push .githooks/post-commit .githooks/post-index-change
         echo 'SemVer hooks enabled for this clone. Commit and push normally.'
         ;;
+    --uninstall) uninstall "$@" ;;
     --sync)
         test "$#" -eq 1 || fail 'Unexpected sync arguments.'
         if test -d "$state"; then continue_operation
