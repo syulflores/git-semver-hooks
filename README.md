@@ -101,11 +101,16 @@ If an ordinary push published the branch but rejected the tag, run `git semver -
 git semver                 # Show help
 git semver --help
 git semver --install       # Enable hooks for this clone
+git semver --update        # Check the source and update hooks and the release workflow
 git semver --uninstall     # Restore local Git settings and disable these hooks
 git semver --sync          # Synchronize and refresh the release draft; do not push
 git semver --continue      # Resume the interrupted operation
 git semver --abort         # Cancel the interrupted operation
 ```
+
+`git semver --update` checks the source repository's default branch using Git. It replaces changed hook scripts and `.github/workflows/release.yml`, including any customizations to those files. Previous files are saved under the Git directory in `semver-update-backup.*`. Review the changes and restore any project-specific workflow settings before committing. Your `.githooks/semver.conf`, `.gitattributes`, version, changelog, and other project files are retained. Finish active recovery, rebases, and merges before updating.
+
+When no files differ, it reports `SemVer: updated to the most recent version.` If the source cannot be reached or found, it reports `SemVer: can't find the source.` without showing the repository name or URL.
 
 ## Configuration
 

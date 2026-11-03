@@ -1,6 +1,8 @@
 #!/bin/sh
-# Manual installation, uninstallation, synchronization, and recovery commands.
+# Manual installation, updates, uninstallation, synchronization, and recovery.
 set -eu
+# Update from the source repository's default branch, independently of origin.
+update_source=https://github.com/syulflores/git-semver-hooks.git
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 gitdir=$(git rev-parse --absolute-git-dir)
@@ -26,8 +28,92 @@ semver_init
 case "${1:-}" in ''|--help) ;; *) semver_lock "${1:-}" ;; esac
 
 usage() {
-    echo 'Usage: git semver [--install|--uninstall|--sync|--continue|--abort|--help]'
+    echo 'Usage: git semver [--install|--update|--uninstall|--sync|--continue|--abort|--help]'
 }
+
+update() (
+    test "$#" -eq 1 || fail 'Unexpected update arguments.'
+    test ! -d "$state" || fail 'Finish or abort the active operation before updating.'
+    test ! -d "$gitdir/semantic-version-sync" && test ! -f "$gitdir/semantic-version-pending" ||
+        fail 'Finish recovery with the old hooks before updating.'
+    test ! -d "$gitdir/rebase-merge" && test ! -d "$gitdir/rebase-apply" &&
+        test ! -f "$gitdir/MERGE_HEAD" || fail 'Finish the active rebase or merge before updating.'
+
+    # Only the distributed implementation is replaced. Project configuration,
+    # attributes, version, changelog, README, and other workflows stay local.
+    update_files='.githooks/post-commit .githooks/pre-push .githooks/post-index-change .github/workflows/release.yml .githooks/semver'
+    for directory in .githooks .github .github/workflows; do
+        test ! -L "$directory" || fail "Cannot update through symbolic link $directory."
+    done
+    for file in $update_files; do
+        test ! -L "$file" || fail "Cannot update symbolic link $file."
+        test ! -e "$file" || test -f "$file" || fail "Cannot update non-file $file."
+    done
+
+    update_tmp=$(mktemp -d "$gitdir/semver-update.XXXXXX")
+    update_backup=
+    update_applying=false
+    update_cleanup() {
+        result=$?
+        trap - 0
+        if test "$update_applying" = true; then
+            # Restore every replaced file if copying or chmod was interrupted.
+            for file in $changed_files; do
+                if test -f "$update_backup/$file"; then
+                    cp -p "$update_backup/$file" "$root/$file" || :
+                else
+                    rm -f "$root/$file"
+                fi
+            done
+            echo "SemVer: update failed; previous files are backed up in $update_backup." >&2
+        fi
+        rm -rf "$update_tmp"
+        exit "$result"
+    }
+    trap update_cleanup 0
+    trap 'exit 130' 1 2 15
+    git init --bare --quiet "$update_tmp/source"
+    # Suppress Git's diagnostics as they can contain the full source URL.
+    if ! GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git -C "$update_tmp/source" \
+        -c credential.interactive=false fetch --quiet --depth=1 "$update_source" HEAD > /dev/null 2>&1; then
+        fail "can't find the source."
+    fi
+    changed_files=
+    for file in $update_files; do
+        mkdir -p "$update_tmp/files/$(dirname "$file")"
+        if ! git -C "$update_tmp/source" show "FETCH_HEAD:$file" > "$update_tmp/files/$file" 2>/dev/null; then
+            fail 'The source is missing required update files.'
+        fi
+        case "$file" in .githooks/*)
+            sh -n "$update_tmp/files/$file" || fail 'The source contains an invalid hook script.' ;;
+        esac
+        if ! test -f "$file" || ! cmp -s "$file" "$update_tmp/files/$file"; then
+            changed_files="$changed_files $file"
+        fi
+    done
+    grep -Fxq 'if test "${SEMVER_LOAD_FUNCTIONS:-}" = 1; then return 0; fi' \
+        "$update_tmp/files/.githooks/post-commit" || fail 'The source hooks are incompatible.'
+    if test -z "$changed_files"; then
+        echo 'SemVer: updated to the most recent version.'
+        exit 0
+    fi
+
+    update_backup=$(mktemp -d "$gitdir/semver-update-backup.XXXXXX")
+    for file in $changed_files; do
+        mkdir -p "$update_backup/$(dirname "$file")"
+        test ! -f "$file" || cp -p "$file" "$update_backup/$file"
+    done
+    update_applying=true
+    # Replace the dispatcher last, after downloading and validating everything.
+    for file in $changed_files; do
+        mkdir -p "$(dirname "$file")"
+        cp "$update_tmp/files/$file" "$file"
+        case "$file" in .githooks/*) chmod +x "$file" ;; esac
+    done
+    update_applying=false
+    echo 'SemVer: updated to the most recent version. Review and commit the updated files.'
+    echo "SemVer: previous files backed up in $update_backup."
+)
 
 # Configuration belongs to the common Git directory, including in worktrees.
 install_dir=$(cd "$(git rev-parse --git-common-dir)" && pwd)/semver-install
@@ -283,6 +369,7 @@ case "${1:-}" in
         chmod +x .githooks/pre-push .githooks/post-commit .githooks/post-index-change
         echo 'SemVer hooks enabled for this clone. Commit and push normally.'
         ;;
+    --update) update "$@" ;;
     --uninstall) uninstall "$@" ;;
     --sync)
         test "$#" -eq 1 || fail 'Unexpected sync arguments.'
