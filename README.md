@@ -49,6 +49,8 @@ git push
 
 Several commits before a push share one provisional release. From `1.2.3`, two fixes keep the draft at `1.2.4`; adding a feature changes it to `1.3.0`. The notes contain all qualifying commits since the published release. The provisional tag follows the latest commit; only tags recorded by this clone as unpublished drafts are moved. Published and unrelated tags are preserved.
 
+Set `commit_version=true` in `.githooks/semver.conf` to include the release tag after the colon in the latest release commit's subject, for example `fix: [v1.2.4] correct a bug`. Subjects without a Conventional Commit prefix get the label at the start. This is off by default. The message body is preserved. Refreshing a draft replaces its generated label; synchronization removes generated labels from unpublished history before rebuilding the release. Earlier commits in a draft can show provisional versions until synchronization; the tagged commit carries the release version.
+
 `pre-push` compares the prepared branch baseline with the remote ID Git already supplies to the hook, checks the selected commit and release tag, then lets Git push. It makes no network calls and does not change files or start another push. `push.followTags=true` includes the annotated release tag with an ordinary push. Repeating a successful push does not increment the version.
 
 If the destination branch changes between commit and push, or local code still needs integration, push stops with instructions to run `git semver --sync`, then retry `git push`. A conflicting release tag also blocks publication. Unrelated remote branches and tags no longer invalidate preparation. Git checks the refs again on the server, covering changes after the hook runs.
@@ -114,6 +116,7 @@ Edit shell variables in `.githooks/semver.conf`. Use quotes for spaces and `''` 
 | `version_file` | `VERSION` | Repository-relative plain-text or JSON file. |
 | `version_field` | Empty | Empty for plain text; otherwise a unique JSON field name. |
 | `tag_prefix` | `v` | Must match `TAG_PREFIX` in the release workflow. |
+| `commit_version` | `false` | Insert `[<release tag>]` after the subject colon (or at the start for ordinary subjects); uses `tag_prefix`. |
 | `changelog_file` | `CHANGELOG.md` | Repository-relative changelog path. |
 | `changelog_heading` | Template heading | Literal `\n` separates lines; must match the file header. |
 | `changelog_breaking_title` | Empty | Optional heading for breaking changes. |
