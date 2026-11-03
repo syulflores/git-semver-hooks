@@ -192,7 +192,7 @@ case "${1:-}" in
         done
         existing=$(git config --get alias.semver || :)
         case "$existing" in
-            ''|'!sh .githooks/semver'|*semver-release/engine*) ;;
+            ''|'!sh .githooks/semver'|'!f() { if test -f .githooks/semver; then sh .githooks/semver "$@"; fi; }; f'|*semver-release/engine*) ;;
             *) fail 'An unrelated semver alias already exists.' ;;
         esac
         if test -z "$existing" && git --list-cmds=main,others | grep -Fxq semver; then fail 'A git-semver command already exists.'; fi
