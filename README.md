@@ -5,7 +5,7 @@ Dependency-free Conventional Commit releases using Git and its POSIX shell (incl
 ## Install
 
 1. Copy `.githooks`, `.github`, and `.gitattributes` into your project. Merge existing files; do not copy `.git`, this README, or this template's release history.
-2. Configure `.githooks/semver.conf`. Commit the settings and starting version file in a `chore:` commit. The remote branch's version is the release baseline.
+2. Configure `.githooks/semver.conf` and `.github/workflows/release.conf`. Commit the settings and starting version file in a `chore:` commit. The remote branch's version is the release baseline.
 3. Run once per clone, in PowerShell or Git Bash:
 
    ```sh
@@ -108,7 +108,9 @@ git semver --continue      # Resume the interrupted operation
 git semver --abort         # Cancel the interrupted operation
 ```
 
-`git semver --update` checks the source repository's default branch using Git. It replaces changed hook scripts and `.github/workflows/release.yml`, including any customizations to those files. Previous files are saved under the Git directory in `semver-update-backup.*`. Review the changes and restore any project-specific workflow settings before committing. Your `.githooks/semver.conf`, `.gitattributes`, version, changelog, and other project files are retained. Finish active recovery, rebases, and merges before updating.
+`git semver --update` checks the source repository's default branch using Git. It replaces changed hook scripts and `.github/workflows/release.yml`, including customizations to their implementation. Previous files are saved under the Git directory in `semver-update-backup.*`. Your `.githooks/semver.conf`, `.github/workflows/release.conf`, `.gitattributes`, version, changelog, and other project files are retained. Review and commit the updated files. Finish active recovery, rebases, and merges before updating.
+
+When `.github/workflows/release.conf` is missing, the updater creates it from the source defaults and migrates the four publishing settings from the old workflow's top-level `env:` block. Simple quoted strings and plain values are supported. Complex YAML or GitHub expressions stop the update before files are replaced; create the config manually and retry. Older copies of the updater do not perform this migration: create `.github/workflows/release.conf` with your settings before their first update, or recover the settings from the workflow backup afterward.
 
 When no files differ, it reports `SemVer: updated to the most recent version.` If the source cannot be reached or found, it reports `SemVer: can't find the source.` without showing the repository name or URL.
 
@@ -120,7 +122,7 @@ Edit shell variables in `.githooks/semver.conf`. Use quotes for spaces and `''` 
 | --- | --- | --- |
 | `version_file` | `VERSION` | Repository-relative plain-text or JSON file. |
 | `version_field` | Empty | Empty for plain text; otherwise a unique JSON field name. |
-| `tag_prefix` | `v` | Must match `TAG_PREFIX` in the release workflow. |
+| `tag_prefix` | `v` | Must match `TAG_PREFIX` in `.github/workflows/release.conf`. |
 | `commit_version` | `false` | Insert `[<release tag>]` after the subject colon (or at the start for ordinary subjects); uses `tag_prefix`. |
 | `changelog_file` | `CHANGELOG.md` | Repository-relative changelog path. |
 | `changelog_heading` | Template heading | Literal `\n` separates lines; must match the file header. |
@@ -147,7 +149,16 @@ Plain-text version files contain only `X.Y.Z`. For JSON, set `version_file=manif
 
 Nested fields work by their unique name, not a dotted path. Unrelated JSON fields are preserved. Manual version or changelog edits produce a warning and are kept in the commit and push. A manually chosen version must use `X.Y.Z` and becomes the release tag's version. A manually edited changelog is kept as written. These overrides remain in effect for subsequent commits in the same unpublished release; tag notes still collect qualifying commit messages. After publication, automatic updates resume from the published version and changelog. Synchronization preserves manual edits, so conflicts involving those edits require resolution. Commits with no release-triggering changes and no active draft do not regenerate metadata.
 
-Settings at the top of `.github/workflows/release.yml` control publishing. Grouped release notes come from annotated tags. Disable any previous semantic-release job that increments versions or commits release files back to the branch.
+Edit shell variables in `.github/workflows/release.conf` to control publishing. This file is retained by `git semver --update`.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `RELEASE_BRANCHES` | `main` | Space-separated exact branch names; empty allows all branches. Tag pushes and manual runs bypass this filter. |
+| `TAG_PREFIX` | `v` | Must match `tag_prefix` in `.githooks/semver.conf`. |
+| `RELEASE_TITLE_PREFIX` | Empty | Text before the tag in release titles. |
+| `UPDATE_LATEST` | `true` | Set to `false` to leave GitHub's Latest selection alone. |
+
+The workflow loads the config from the checked-out commit, so commit and push config changes to use them in CI. Older tagged commits without the file use the defaults above. Grouped release notes come from annotated tags. Disable any previous semantic-release job that increments versions or commits release files back to the branch.
 
 ## Boundaries
 

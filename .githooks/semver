@@ -31,6 +31,50 @@ usage() {
     echo 'Usage: git semver [--install|--update|--uninstall|--sync|--continue|--abort|--help]'
 }
 
+# Migrate the old top-level env block without executing YAML as shell code.
+# Ambiguous YAML is left for manual migration rather than changing its meaning.
+migrate_release_config() {
+    awk '
+        function invalid() { exit 1 }
+        function shell_quote(value, result, i, c) {
+            result = quote
+            for (i = 1; i <= length(value); i++) {
+                c = substr(value, i, 1)
+                result = result (c == quote ? quote "\\" quote quote : c)
+            }
+            return result quote
+        }
+        BEGIN { quote = sprintf("%c", 39) }
+        { sub(/\r$/, "") }
+        /^env:/ {
+            if ($0 !~ /^env:[ \t]*(#.*)?$/) invalid()
+            in_env = 1; next
+        }
+        /^[^ \t#]/ { in_env = 0 }
+        in_env && /^[ \t]+<<:/ { invalid() }
+        in_env && /^[ \t]+(RELEASE_BRANCHES|TAG_PREFIX|RELEASE_TITLE_PREFIX|UPDATE_LATEST):/ {
+            key = $0; sub(/^[ \t]+/, "", key); sub(/:.*/, "", key)
+            if (seen[key]++) invalid()
+            value = $0; sub(/^[^:]*:[ \t]*/, "", value)
+            if (substr(value, 1, 1) == "\"") {
+                if (value !~ /^"[^"\\]*"[ \t]*(#.*)?$/) invalid()
+                sub(/^"/, "", value); sub(/"[ \t]*(#.*)?$/, "", value)
+            } else if (substr(value, 1, 1) == quote) {
+                pattern = "^" quote "([^" quote "]|" quote quote ")*" quote "[ \t]*(#.*)?$"
+                if (value !~ pattern) invalid()
+                sub("^" quote, "", value); sub(quote "[ \t]*(#.*)?$", "", value)
+                gsub(quote quote, quote, value)
+            } else {
+                sub(/[ \t]+#.*/, "", value); sub(/[ \t]+$/, "", value)
+                if (value !~ /^[A-Za-z0-9_.\/-]+$/ || value ~ /^(null|Null|NULL)$/) invalid()
+            }
+            # GitHub expressions need manual conversion to shell configuration.
+            if (index(value, "${{")) invalid()
+            print key "=" shell_quote(value)
+        }
+    ' "$1"
+}
+
 update() (
     test "$#" -eq 1 || fail 'Unexpected update arguments.'
     test ! -d "$state" || fail 'Finish or abort the active operation before updating.'
@@ -45,7 +89,7 @@ update() (
     for directory in .githooks .github .github/workflows; do
         test ! -L "$directory" || fail "Cannot update through symbolic link $directory."
     done
-    for file in $update_files; do
+    for file in $update_files .github/workflows/release.conf; do
         test ! -L "$file" || fail "Cannot update symbolic link $file."
         test ! -e "$file" || test -f "$file" || fail "Cannot update non-file $file."
     done
@@ -93,6 +137,28 @@ update() (
     done
     grep -Fxq 'if test "${SEMVER_LOAD_FUNCTIONS:-}" = 1; then return 0; fi' \
         "$update_tmp/files/.githooks/post-commit" || fail 'The source hooks are incompatible.'
+    # Existing project settings are never overwritten. On the first update,
+    # create the config from source defaults plus the old workflow env values.
+    if test ! -f .github/workflows/release.conf &&
+        grep -Fq '.github/workflows/release.conf' "$update_tmp/files/.github/workflows/release.yml"; then
+        git -C "$update_tmp/source" show FETCH_HEAD:.github/workflows/release.conf \
+            > "$update_tmp/files/.github/workflows/release.conf" 2>/dev/null ||
+            fail 'The source is missing .github/workflows/release.conf.'
+        sh -n "$update_tmp/files/.github/workflows/release.conf" || fail 'The source contains invalid release configuration.'
+        if test -f .github/workflows/release.yml; then
+            migrate_release_config .github/workflows/release.yml > "$update_tmp/release-overrides" ||
+                fail 'Cannot migrate workflow settings automatically; create .github/workflows/release.conf with your settings before updating.'
+            # Replace defaults in place so each setting has one editable value.
+            awk '
+                FILENAME == ARGV[1] { key = $0; sub(/=.*/, "", key); overrides[key] = $0; next }
+                { key = $0; sub(/=.*/, "", key)
+                  if (key in overrides) print overrides[key]; else print }
+            ' "$update_tmp/release-overrides" "$update_tmp/files/.github/workflows/release.conf" > "$update_tmp/release-config"
+            mv "$update_tmp/release-config" "$update_tmp/files/.github/workflows/release.conf"
+        fi
+        # Install the config before the workflow and dispatcher; rollback covers it.
+        changed_files=".github/workflows/release.conf $changed_files"
+    fi
     if test -z "$changed_files"; then
         echo 'SemVer: updated to the most recent version.'
         exit 0
@@ -369,7 +435,8 @@ case "${1:-}" in
         chmod +x .githooks/pre-push .githooks/post-commit .githooks/post-index-change
         echo 'SemVer hooks enabled for this clone. Commit and push normally.'
         ;;
-    --update) update "$@" ;;
+    # The dispatcher may have replaced itself; do not read from it again.
+    --update) update "$@"; exit ;;
     --uninstall) uninstall "$@" ;;
     --sync)
         test "$#" -eq 1 || fail 'Unexpected sync arguments.'
