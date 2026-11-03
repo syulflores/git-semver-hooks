@@ -5,7 +5,7 @@ Dependency-free Conventional Commit releases using Git and its POSIX shell (incl
 ## Install
 
 1. Copy `.githooks`, `.github`, and `.gitattributes` into your project. Merge existing files; do not copy `.git`, this README, or this template's release history.
-2. Configure `.githooks/semver.conf`. Commit the settings and starting version file in a `chore:` commit. If release tags exist, the version must match the latest reachable stable release.
+2. Configure `.githooks/semver.conf`. Commit the settings and starting version file in a `chore:` commit. The remote branch's version is the release baseline.
 3. Run once per clone, in PowerShell or Git Bash:
 
    ```sh
@@ -23,15 +23,17 @@ git commit -m "fix: correct a bug"
 git push
 ```
 
-`post-commit` checks the tracking remote, analyzes unreleased commits, generates the version and grouped changelog, amends the current commit, and creates its provisional annotated tag. It records the remote's branches and tags for the push check. Internal amendments disable hooks to prevent recursion. If the remote branch has advanced, preparation stops and asks you to run `git semver --sync`; a normal commit does not rebase or merge automatically.
+`post-commit` fetches the tracking remote once, uses its version as the baseline, generates the version and grouped changelog, amends the current commit, and creates its provisional annotated tag. If the remote is ahead, its changelog supplies the published history; local code stays in place until `git semver --sync` integrates it. Internal amendments disable hooks to prevent recursion.
+
+`post-commit` contains the release functions and runs automatic commit preparation. The `semver` script handles manual commands and loads only the function definitions from `post-commit`; loading them does not run automatic commit preparation. Ordinary commits do not invoke `semver`. Active recovery snapshots include both scripts and the configuration so synchronization can resume after a rebase checks out older hook files.
 
 Several commits before a push share one provisional release. From `1.2.3`, two fixes keep the draft at `1.2.4`; adding a feature changes it to `1.3.0`. The notes contain all qualifying commits since the published release. The provisional tag follows the latest commit; only tags recorded by this clone as unpublished drafts are moved. Published and unrelated tags are preserved.
 
-`pre-push` checks that the remote's branches and tags exactly match the snapshot taken during commit preparation, then validates the selected commits and tags. If nothing changed, Git pushes the prepared commit and release tag. Push does not update the version or changelog, rewrite history, or start a nested push. `push.followTags=true` includes the annotated release tag with an ordinary push. Repeating a successful push does not increment the version.
+`pre-push` compares the prepared branch baseline with the remote ID Git already supplies to the hook, checks the selected commit and release tag, then lets Git push. It makes no network calls and does not change files or start another push. `push.followTags=true` includes the annotated release tag with an ordinary push. Repeating a successful push does not increment the version.
 
-Commits perform network and release work, so they take longer than plain Git commits. If any remote branch or tag is added, changed, or deleted after preparation, the push stops with instructions to run `git semver --sync`, then retry `git push`. Git still checks the refs being pushed on the server; the snapshot check cannot lock unrelated remote refs against changes after the check.
+If the destination branch changes between commit and push, or local code still needs integration, push stops with instructions to run `git semver --sync`, then retry `git push`. A conflicting release tag also blocks publication. Unrelated remote branches and tags no longer invalidate preparation. Git checks the refs again on the server, covering changes after the hook runs.
 
-Ordinary `git push` does not guarantee an atomic branch-and-tag update. Use `git push --atomic` when you require both to succeed or fail together; the server must support it. `git semver --push` also prepares and publishes atomically.
+Ordinary `git push` does not guarantee an atomic branch-and-tag update. Use `git push --atomic` when you require both to succeed or fail together; the server must support it.
 
 | Commit message | Release impact |
 | --- | --- |
@@ -59,7 +61,7 @@ git push
 
 With `auto_continue=true` (the default), staging the last conflict automatically continues synchronization and rebuilds the release draft once there are no unstaged changes. If another commit conflicts, resolve and stage it too. Your merge manager must use Git's hooks when staging; saving a file alone does not trigger continuation. Set `auto_continue=false` before starting synchronization to require `git semver --continue` after staging instead. The manual command remains available for managers that bypass hooks.
 
-Automatic continuation resumes the original operation: a normal commit or `--sync` prepares locally, while an explicit `--push` also publishes. A commit hook's failure does not undo the original code commit: read its output. Pushes remain blocked until preparation succeeds. When working files or connectivity caused the failure, fix the problem and run `git semver --sync` to resume.
+Automatic continuation finishes synchronization and prepares the release locally; run `git push` to publish. A commit hook's failure does not undo the original code commit: read its output. Pushes remain blocked until preparation succeeds. When working files or connectivity caused the failure, fix the problem and run `git semver --sync` to resume.
 
 ```sh
 git semver --abort
@@ -69,7 +71,7 @@ Abort restores an active rebase and its original provisional tag. Completed sync
 
 A rejected ordinary push retains its prepared commit and tag. Retry the push after fixing authentication or server policy; if remote history changed, synchronize first. No hook force-pushes or silently discards working files.
 
-If an ordinary push published the branch but rejected the tag, retry the push to complete tag publication. If you already made another commit, follow the error's tag-only push command, then run `git semver --sync`. The published release commit is retained.
+If an ordinary push published the branch but rejected the tag, run `git semver --sync` to confirm publication, follow its tag-only push command, then run `git semver --sync` again. The published release commit is retained. This check prevents Git from publishing a draft tag alone when it has omitted a rejected branch from the hook input.
 
 ## Commands
 
@@ -80,7 +82,6 @@ git semver --install       # Enable hooks for this clone
 git semver --sync          # Synchronize and refresh the release draft; do not push
 git semver --continue      # Resume the interrupted operation
 git semver --abort         # Cancel the interrupted operation
-git semver --push          # Optional: synchronize, prepare and push atomically
 ```
 
 ## Configuration
@@ -115,7 +116,7 @@ Plain-text version files contain only `X.Y.Z`. For JSON, set `version_file=manif
 }
 ```
 
-Nested fields work by their unique name, not a dotted path. Unrelated JSON fields are preserved. Manual version changes or edits to an active draft's changelog block generation for reconciliation instead of being discarded. Existing committed changelog content is retained below the generated section.
+Nested fields work by their unique name, not a dotted path. Unrelated JSON fields are preserved. Manual version or changelog edits produce a warning and are kept in the commit and push. A manually chosen version must use `X.Y.Z` and becomes the release tag's version. A manually edited changelog is kept as written. These overrides remain in effect for subsequent commits in the same unpublished release; tag notes still collect qualifying commit messages. After publication, automatic updates resume from the published version and changelog. Synchronization preserves manual edits, so conflicts involving those edits require resolution. Commits with no release-triggering changes and no active draft do not regenerate metadata.
 
 Settings at the top of `.github/workflows/release.yml` control publishing. Grouped release notes come from annotated tags. Disable any previous semantic-release job that increments versions or commits release files back to the branch.
 
