@@ -14,7 +14,8 @@ version_tag() {
 }
 updates=$gitdir/semver-push-updates.$$
 advertised=$gitdir/semver-push-remote.$$
-trap 'rm -f "$updates" "$advertised"' 0
+snapshot=$gitdir/semver-push-snapshot.$$
+trap 'rm -f "$updates" "$advertised" "$snapshot"' 0
 cat > "$updates"
 protected=false
 branch_updates=false
@@ -48,19 +49,12 @@ fetch_url=$(git remote get-url "$expected_remote")
 push_urls=$(git remote get-url --push --all "$expected_remote")
 test "$push_urls" = "$fetch_url" && test "$2" = "$fetch_url" || fail 'Push URL differs from the prepared fetch destination.'
 git ls-remote --heads --tags "$2" > "$advertised" || fail 'Cannot check the push destination.'
-# Tag-only changes can invalidate a prepared version even if the branch is unchanged.
+# Compare every branch and tag, including deletions and forced updates. Ignore
+# peeled annotated-tag entries: the tag object's identity already covers them.
 if test "$branch_updates" = true; then
-while read -r oid ref; do
-    case "$ref" in
-        refs/tags/"$tag_prefix"*)
-            name=${ref#refs/tags/}; number=${name#"$tag_prefix"}
-            if printf '%s\n' "$number" | awk '/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ {ok=1} END {exit !ok}'; then
-                known=$(git rev-parse --verify "refs/semver/tags/$name" 2>/dev/null || :)
-                test "$known" = "$oid" || fail 'Remote release tags changed. Run git semver --sync, then git push.'
-            fi
-            ;;
-    esac
-done < "$advertised"
+    test -f "$gitdir/semver-ready-remote" || fail 'Missing commit remote snapshot. Run git semver --sync before pushing.'
+    awk '$2 !~ /\^\{\}$/ {print $1 " " $2}' "$advertised" | LC_ALL=C sort > "$snapshot"
+    cmp -s "$gitdir/semver-ready-remote" "$snapshot" || fail 'Remote branches or tags changed since commit preparation. Run git semver --sync, then git push.'
 fi
 while read -r local_ref local_oid remote_ref remote_oid; do
     case "$local_oid" in *[!0]*) ;; *) continue ;; esac

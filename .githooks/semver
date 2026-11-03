@@ -112,6 +112,15 @@ fetch_remote() {
         refs/remotes/*) if test -n "$target"; then git update-ref "$upstream_ref" "$target"; fi ;;
     esac
 }
+mark_ready() {
+    # Record exactly the branch/tag state used to prepare this commit. A push
+    # may inspect the remote, but must not refresh this baseline or the release.
+    git for-each-ref --format='%(objectname) %(refname)' refs/semver/heads/ refs/semver/tags/ |
+        sed -e 's@ refs/semver/heads/@ refs/heads/@' -e 's@ refs/semver/tags/@ refs/tags/@' |
+        LC_ALL=C sort > "$state/remote-snapshot"
+    mv "$state/remote-snapshot" "$gitdir/semver-ready-remote"
+    git update-ref refs/semver/ready HEAD
+}
 assert_unpublished() {
     test -z "$(git for-each-ref --contains="$1" --format='%(refname)' refs/semver/heads/ refs/semver/tags/)" ||
         fail 'Refusing to rewrite a commit already published on this remote.'
@@ -455,7 +464,7 @@ publish() {
     while test "$attempts" -lt 3; do
         attempts=$((attempts+1))
         prepare_release
-        git update-ref refs/semver/ready HEAD
+        mark_ready
         rm -f "$pending"
         if test -f "$state/after-amend"; then
             test "$(git rev-parse HEAD)" = "$(cat "$state/after-amend")" || fail 'HEAD changed during preparation; inspect before continuing.'
@@ -487,7 +496,7 @@ publish() {
 }
 complete() {
     if test "$mode" = push; then publish
-    else prepare_release; git update-ref refs/semver/ready HEAD; rm -f "$pending"; finish; echo 'SemVer: ready for git push.'; fi
+    else prepare_release; mark_ready; rm -f "$pending"; finish; echo 'SemVer: ready for git push.'; fi
 }
 start() {
     test ! -d "$state" || fail 'An operation is active. Use --continue or --abort.'
@@ -524,7 +533,17 @@ start() {
     git rev-parse HEAD > "$state/original"
     test ! -d "$draft" || cp -R "$draft" "$state/draft-before"
     git update-ref refs/semver/original HEAD
-    sync_history
+    if test "$mode" = commit; then
+        # Normal commits prepare metadata only. History integration is explicit.
+        phase sync
+        fetch_remote
+        if test -n "$target"; then
+            git merge-base --is-ancestor "$target" HEAD ||
+                fail 'Remote history advanced. Run git semver --sync to synchronize and prepare this commit.'
+        fi
+    else
+        sync_history
+    fi
     complete
 }
 continue_operation() {

@@ -23,13 +23,13 @@ git commit -m "fix: correct a bug"
 git push
 ```
 
-`post-commit` checks the tracking remote, synchronizes unpublished code if needed, analyzes unreleased commits, generates the version and grouped changelog, amends the current commit, and creates its provisional annotated tag. Internal amendments disable hooks to prevent recursion.
+`post-commit` checks the tracking remote, analyzes unreleased commits, generates the version and grouped changelog, amends the current commit, and creates its provisional annotated tag. It records the remote's branches and tags for the push check. Internal amendments disable hooks to prevent recursion. If the remote branch has advanced, preparation stops and asks you to run `git semver --sync`; a normal commit does not rebase or merge automatically.
 
 Several commits before a push share one provisional release. From `1.2.3`, two fixes keep the draft at `1.2.4`; adding a feature changes it to `1.3.0`. The notes contain all qualifying commits since the published release. The provisional tag follows the latest commit; only tags recorded by this clone as unpublished drafts are moved. Published and unrelated tags are preserved.
 
-`pre-push` checks the selected commits and tags against the destination. It never rewrites history or starts a nested push. `push.followTags=true` includes the annotated release tag with an ordinary push. Repeating a successful push does not increment the version.
+`pre-push` checks that the remote's branches and tags exactly match the snapshot taken during commit preparation, then validates the selected commits and tags. If nothing changed, Git pushes the prepared commit and release tag. Push does not update the version or changelog, rewrite history, or start a nested push. `push.followTags=true` includes the annotated release tag with an ordinary push. Repeating a successful push does not increment the version.
 
-Commits now perform network and release work, so they take longer than plain Git commits. If the remote advances after the commit, the push stops with instructions to run `git semver --sync`, then retry `git push`. A race after the final check is still handled by Git's normal push rejection.
+Commits perform network and release work, so they take longer than plain Git commits. If any remote branch or tag is added, changed, or deleted after preparation, the push stops with instructions to run `git semver --sync`, then retry `git push`. Git still checks the refs being pushed on the server; the snapshot check cannot lock unrelated remote refs against changes after the check.
 
 Ordinary `git push` does not guarantee an atomic branch-and-tag update. Use `git push --atomic` when you require both to succeed or fail together; the server must support it. `git semver --push` also prepares and publishes atomically.
 
