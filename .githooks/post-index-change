@@ -3,7 +3,8 @@
 set -eu
 test "${SEMVER_ENGINE_ACTIVE:-}" != 1 || exit 0
 test -z "${GIT_INDEX_FILE:-}" || exit 0
-gitdir=$(git rev-parse --absolute-git-dir)
+# Reuse Git's directory when supplied; discover it for other invocations.
+gitdir=${GIT_DIR:-$(git rev-parse --absolute-git-dir)}
 state=$gitdir/semver-release
 test -f "$state/engine" && test -f "$state/phase" || exit 0
 test "$(cat "$state/phase")" = rebase || exit 0

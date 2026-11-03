@@ -6,8 +6,9 @@ gitdir=$(git rev-parse --absolute-git-dir)
 for operation in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
     test ! -e "$gitdir/$operation" || exit 0
 done
-cd "$(git rev-parse --show-toplevel)"
-if ! sh .githooks/semver --commit; then
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+if ! SEMVER_HOOK_ROOT=$root SEMVER_HOOK_GITDIR=$gitdir sh .githooks/semver --commit; then
     echo 'SemVer: the code commit exists, but release preparation is incomplete. Fix the error, then run git semver --sync before pushing.' >&2
     exit 1
 fi
