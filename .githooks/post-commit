@@ -15,6 +15,8 @@ semver_init() {
     case "$auto_continue" in true|false) ;; *) fail 'auto_continue must be true or false.' ;; esac
     commit_version=${commit_version-false}
     case "$commit_version" in true|false) ;; *) fail 'commit_version must be true or false.' ;; esac
+    changelog_remove_extra_headings=${changelog_remove_extra_headings-true}
+    case "$changelog_remove_extra_headings" in true|false) ;; *) fail 'changelog_remove_extra_headings must be true or false.' ;; esac
     # Internal index reads/writes and merge tools are handled by this running engine.
     export SEMVER_ENGINE_ACTIVE=1
     test "$version_file" != "$changelog_file" || fail 'Version and changelog paths must differ.'
@@ -455,9 +457,10 @@ prepare_release() {
         git show "$release_parent:$changelog_file" > "$raw_changelog" 2>/dev/null || printf '%s\n' "$heading" > "$raw_changelog"
     elif test -f "$changelog_file"; then raw_changelog=$changelog_file
     else raw_changelog=$state/raw-changelog; printf '%s\n' "$heading" > "$raw_changelog"; fi
-    # Retain custom published headers, normalize CRLF, and render notes and the changelog in
+    # Normalize existing titles and CRLF, and render notes and the changelog in
     # one process. Environment values preserve literal backslashes in titles.
     SEMVER_CHANGELOG_HEADING=$heading \
+    SEMVER_REMOVE_EXTRA_HEADINGS=$changelog_remove_extra_headings \
     SEMVER_BREAKING_TITLE=${changelog_breaking_title-} \
     SEMVER_FEATURES_TITLE=${changelog_features_title-} \
     SEMVER_FIXES_TITLE=${changelog_fixes_title-} \
@@ -486,7 +489,8 @@ prepare_release() {
         }
         {gsub(/\r/, "")}
         NR<=count {
-            prefix=prefix $0 "\n"
+            if(ENVIRON["SEMVER_REMOVE_EXTRA_HEADINGS"]!="true" || $0!~/^ {0,3}#([ \t]+|$)/)
+                prefix=prefix $0 "\n"
             if($0!=header[NR]) custom_header=1
             if(NR==count && custom_header) {
                 printf "%s", prefix > (dir "/new-changelog")
@@ -495,6 +499,7 @@ prepare_release() {
             next
         }
         !started && /^[[:space:]]*$/ {next}
+        ENVIRON["SEMVER_REMOVE_EXTRA_HEADINGS"]=="true" && /^ {0,3}#([ \t]+|$)/ {next}
         {started=1; print > (dir "/new-changelog")}
         END {if(NR<count) printf "%s", prefix > (dir "/new-changelog")}
     ' "$raw_changelog" || fail 'Cannot generate the changelog.'

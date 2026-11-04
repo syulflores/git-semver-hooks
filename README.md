@@ -125,7 +125,8 @@ Edit shell variables in `.githooks/semver.conf`. Use quotes for spaces and `''` 
 | `tag_prefix` | `v` | Must match `TAG_PREFIX` in `.github/workflows/release.conf`. |
 | `commit_version` | `false` | Insert `[<release tag>]` after the subject colon (or at the start for ordinary subjects); uses `tag_prefix`. |
 | `changelog_file` | `CHANGELOG.md` | Repository-relative changelog path. |
-| `changelog_heading` | Template heading | Literal `\n` separates lines; must match the file header. |
+| `changelog_heading` | Template heading | Header placed above generated releases; literal `\n` separates lines. |
+| `changelog_remove_extra_headings` | `true` | Remove existing Markdown top-level (`#`) titles so only the configured header remains. Set `false` to retain custom titles. Release (`##`) and category (`###`) headings and other text are preserved. Applies when generating releases; manually preserved changelogs remain untouched. |
 | `changelog_breaking_title` | Empty | Optional heading for breaking changes. |
 | `changelog_features_title` | Empty | Optional heading for features. |
 | `changelog_fixes_title` | Empty | Optional heading for bug fixes. |
