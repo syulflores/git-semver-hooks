@@ -261,6 +261,16 @@ install_dir=$(cd "$(git rev-parse --git-common-dir)" && pwd)/semver-install
 install_keys='alias.semver core.hooksPath semver.enabled push.followTags'
 installed_alias='!f() { p=$(git rev-parse --git-path semver-release/engine) || return; test -f "$p" || p=.githooks/semver; sh "$p" "$@"; }; f'
 
+is_semver_alias() {
+    # Compare known bootstrap commands without shell quoting or whitespace.
+    # Never evaluate an existing alias while checking it.
+    normalized_alias=$(printf '%s' "$1" | tr -d '[:space:]\042\047\134')
+    case "$normalized_alias" in
+        '!sh.githooks/semver'|'!f(){iftest-f.githooks/semver;thensh.githooks/semver$@;fi;};f'|*semver-release/engine*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 installed_value() {
     case "$1" in
         alias.semver) printf '%s\n' "$installed_alias" ;;
@@ -287,10 +297,9 @@ save_install_config() {
         else test "$?" -eq 1 || fail "Cannot save local setting $key."; fi
     done
     # The documented bootstrap alias is part of setup, not a previous command.
-    case "$(git config --local --get-all alias.semver || :)" in
-        '!sh .githooks/semver'|"$installed_alias"|'!f() { if test -f .githooks/semver; then sh .githooks/semver "$@"; fi; }; f')
-            : > "$install_dir/alias.semver" ;;
-    esac
+    if is_semver_alias "$(git config --local --get-all alias.semver || :)"; then
+        : > "$install_dir/alias.semver"
+    fi
     : > "$install_dir/complete"
 }
 
@@ -495,10 +504,9 @@ case "${1:-}" in
             fi
         done
         existing=$(git config --get alias.semver || :)
-        case "$existing" in
-            ''|'!sh .githooks/semver'|'!f() { if test -f .githooks/semver; then sh .githooks/semver "$@"; fi; }; f'|*semver-release/engine*) ;;
-            *) fail 'An unrelated semver alias already exists.' ;;
-        esac
+        if test -n "$existing" && ! is_semver_alias "$existing"; then
+            fail 'An unrelated semver alias already exists.'
+        fi
         if test -z "$existing" && git --list-cmds=main,others | grep -Fxq semver; then fail 'A git-semver command already exists.'; fi
         hooks=$(git config --get core.hooksPath || :)
         case "$hooks" in ''|.githooks|/dev/null|nul) ;; *) fail 'An existing hooksPath needs to be integrated manually.' ;; esac
