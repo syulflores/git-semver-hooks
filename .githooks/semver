@@ -160,7 +160,7 @@ update() (
         changed_files=".github/workflows/release.conf $changed_files"
     fi
     # Read assignments as text, never by sourcing downloaded configuration.
-    # Append only missing defaults, leaving every existing byte untouched.
+    # Insert missing defaults beside their neighbors in the source template.
     for file in .githooks/semver.conf .github/workflows/release.conf; do
         defaults=$update_tmp/defaults
         git -C "$update_tmp/source" show "FETCH_HEAD:$file" > "$defaults" 2>/dev/null ||
@@ -174,32 +174,55 @@ update() (
         elif test ! -f "$candidate"; then
             cp "$defaults" "$candidate"
         fi
-        awk -v BINMODE=3 '
+        terminated=true
+        if test -s "$candidate" && test -n "$(tail -c 1 "$candidate")"; then
+            terminated=false
+        fi
+        awk -v BINMODE=3 -v terminated="$terminated" '
             function key(line) {
                 sub(/^[ \t]*(export[ \t]+)?/, "", line)
                 if (line !~ /^[A-Za-z_][A-Za-z0-9_]*=/) return ""
                 sub(/=.*/, "", line); return line
             }
             FILENAME == ARGV[1] {
-                name = key($0); if (name != "") present[name] = 1
+                lines[++count] = $0
+                name = key($0); if (name != "" && !(name in present)) present[name] = count
                 if (FNR == 1 && /\r$/) cr = "\r"
                 next
             }
             {
                 sub(/\r$/, "")
                 name = key($0)
-                if (name != "" && !present[name]++) print $0 cr
+                if (name != "") {
+                    names[++options] = name
+                    defaults[options] = $0
+                }
             }
-        ' "$candidate" "$defaults" > "$update_tmp/missing-defaults"
-        # Defaults use one assignment per line. Validate the extracted block so
-        # future multiline defaults fail safely instead of being truncated.
-        sh -n "$update_tmp/missing-defaults" || fail "Cannot append defaults from $file automatically."
-        if test -s "$update_tmp/missing-defaults"; then
-            if test -s "$candidate" && test -n "$(tail -c 1 "$candidate")"; then
-                awk -v BINMODE=3 'NR == 1 { printf /\r$/ ? "\r\n" : "\n"; exit }' "$candidate" >> "$candidate"
-            fi
-            cat "$update_tmp/missing-defaults" >> "$candidate"
-        fi
+            END {
+                # Prefer the next existing option, then the previous one.
+                # Keep trailing project comments at the end of the file.
+                for (i = 1; i <= options; i++) {
+                    name = names[i]
+                    if (name in present) { previous = present[name]; continue }
+                    if (added[name]++) continue
+                    position = previous ? previous + 1 : count + 1
+                    for (j = i + 1; j <= options; j++) {
+                        if (names[j] in present) { position = present[names[j]]; break }
+                    }
+                    insert[position] = insert[position] defaults[i] cr "\n"
+                }
+                for (i = 1; i <= count + 1; i++) {
+                    printf "%s", insert[i]
+                    if (i <= count) {
+                        printf "%s", lines[i]
+                        if (i < count || terminated == "true" || insert[count + 1] != "") printf "\n"
+                    }
+                }
+            }
+        ' "$candidate" "$defaults" > "$update_tmp/merged-config"
+        # Validate the complete candidate so multiline defaults fail safely.
+        sh -n "$update_tmp/merged-config" || fail "Cannot insert defaults from $file automatically."
+        mv "$update_tmp/merged-config" "$candidate"
         if ! test -f "$file" || ! cmp -s "$file" "$candidate"; then
             case " $changed_files " in
                 *" $file "*) ;;
