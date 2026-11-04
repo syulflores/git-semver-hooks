@@ -89,7 +89,7 @@ update() (
     for directory in .githooks .github .github/workflows; do
         test ! -L "$directory" || fail "Cannot update through symbolic link $directory."
     done
-    for file in $update_files .github/workflows/release.conf; do
+    for file in $update_files .githooks/semver.conf .github/workflows/release.conf; do
         test ! -L "$file" || fail "Cannot update symbolic link $file."
         test ! -e "$file" || test -f "$file" || fail "Cannot update non-file $file."
     done
@@ -159,6 +159,54 @@ update() (
         # Install the config before the workflow and dispatcher; rollback covers it.
         changed_files=".github/workflows/release.conf $changed_files"
     fi
+    # Read assignments as text, never by sourcing downloaded configuration.
+    # Append only missing defaults, leaving every existing byte untouched.
+    for file in .githooks/semver.conf .github/workflows/release.conf; do
+        defaults=$update_tmp/defaults
+        git -C "$update_tmp/source" show "FETCH_HEAD:$file" > "$defaults" 2>/dev/null ||
+            fail "The source is missing $file."
+        sh -n "$defaults" || fail "The source contains invalid configuration: $file."
+        mkdir -p "$update_tmp/files/$(dirname "$file")"
+        candidate=$update_tmp/files/$file
+        # The migration above has already prepared a missing release.conf.
+        if test -f "$file"; then
+            cp -p "$file" "$candidate"
+        elif test ! -f "$candidate"; then
+            cp "$defaults" "$candidate"
+        fi
+        awk -v BINMODE=3 '
+            function key(line) {
+                sub(/^[ \t]*(export[ \t]+)?/, "", line)
+                if (line !~ /^[A-Za-z_][A-Za-z0-9_]*=/) return ""
+                sub(/=.*/, "", line); return line
+            }
+            FILENAME == ARGV[1] {
+                name = key($0); if (name != "") present[name] = 1
+                if (FNR == 1 && /\r$/) cr = "\r"
+                next
+            }
+            {
+                sub(/\r$/, "")
+                name = key($0)
+                if (name != "" && !present[name]++) print $0 cr
+            }
+        ' "$candidate" "$defaults" > "$update_tmp/missing-defaults"
+        # Defaults use one assignment per line. Validate the extracted block so
+        # future multiline defaults fail safely instead of being truncated.
+        sh -n "$update_tmp/missing-defaults" || fail "Cannot append defaults from $file automatically."
+        if test -s "$update_tmp/missing-defaults"; then
+            if test -s "$candidate" && test -n "$(tail -c 1 "$candidate")"; then
+                awk -v BINMODE=3 'NR == 1 { printf /\r$/ ? "\r\n" : "\n"; exit }' "$candidate" >> "$candidate"
+            fi
+            cat "$update_tmp/missing-defaults" >> "$candidate"
+        fi
+        if ! test -f "$file" || ! cmp -s "$file" "$candidate"; then
+            case " $changed_files " in
+                *" $file "*) ;;
+                *) changed_files="$file $changed_files" ;;
+            esac
+        fi
+    done
     if test -z "$changed_files"; then
         echo 'SemVer: updated to the most recent version.'
         exit 0
@@ -174,7 +222,7 @@ update() (
     for file in $changed_files; do
         mkdir -p "$(dirname "$file")"
         cp "$update_tmp/files/$file" "$file"
-        case "$file" in .githooks/*) chmod +x "$file" ;; esac
+        case "$file" in .githooks/*.conf) ;; .githooks/*) chmod +x "$file" ;; esac
     done
     update_applying=false
     echo 'SemVer: updated to the most recent version. Review and commit the updated files.'
