@@ -15,6 +15,8 @@ semver_init() {
     case "$auto_continue" in true|false) ;; *) fail 'auto_continue must be true or false.' ;; esac
     commit_version=${commit_version-false}
     case "$commit_version" in true|false) ;; *) fail 'commit_version must be true or false.' ;; esac
+    changelog_exact_commit_message=${changelog_exact_commit_message-false}
+    case "$changelog_exact_commit_message" in true|false) ;; *) fail 'changelog_exact_commit_message must be true or false.' ;; esac
     changelog_remove_extra_headings=${changelog_remove_extra_headings-true}
     case "$changelog_remove_extra_headings" in true|false) ;; *) fail 'changelog_remove_extra_headings must be true or false.' ;; esac
     # Internal index reads/writes and merge tools are handled by this running engine.
@@ -170,6 +172,7 @@ release_messages() {
     head_label=
     if test "${draft_active:-false}" = true; then head_label=$(message_label "$release_head"); fi
     git log --reverse --no-merges -z --format='%H%x00%B%x00%s' "$range" > "$state/messages"
+    SEMVER_EXACT_MESSAGE=${1:-false} SEMVER_COMMIT_VERSION=$commit_version SEMVER_RELEASE_TAG=${release_tag:-} \
     SEMVER_HEAD_LABEL=$head_label awk -v head="$release_head" -v patches="$patch_types" -v minors="$minor_types" -v dir="$state" '
         BEGIN {
             while((getline entry < (dir "/message-subjects"))>0) {
@@ -178,12 +181,14 @@ release_messages() {
             RS="\0"
         }
         NR%3==1 {
+            current=($0==head)
             subject=subjects[$0]
             label=($0==head) ? ENVIRON["SEMVER_HEAD_LABEL"] : ""
             next
         }
         NR%3==2 {
             kind=""
+            message=$0
             n=split($0, lines, "\n"); line=tolower(lines[1])
             if(line !~ /^[a-z]+(\([^()]+\))?!?:[[:space:]]+[^[:space:]]/) next
             type=line; sub(/[( !:].*$/, "", type)
@@ -206,6 +211,20 @@ release_messages() {
             else if(kind=="minor") group="features"
             else if($0 ~ /^perf[:(]/) group="performance"
             else group="fixes"
+            if(ENVIRON["SEMVER_EXACT_MESSAGE"]=="true") {
+                n=split(message,lines,"\n")
+                if(current) {
+                    lines[1]=$0
+                    if(ENVIRON["SEMVER_COMMIT_VERSION"]=="true") {
+                        match(lines[1],/^[a-zA-Z]+(\([^()]+\))?!?:[[:space:]]*/); pos=RLENGTH
+                        lines[1]=substr(lines[1],1,pos) "[" ENVIRON["SEMVER_RELEASE_TAG"] "] " substr(lines[1],pos+1)
+                    }
+                }
+                print "- " lines[1] >> (dir "/" group)
+                while(n>1 && lines[n]=="") n--
+                for(i=2;i<=n;i++) print "  " lines[i] >> (dir "/" group)
+                next
+            }
             print "- " $0 >> (dir "/" group)
         }
         END {print bump}
@@ -445,6 +464,10 @@ prepare_release() {
         fi
     fi
     heading=$(printf '%b' "$changelog_heading")
+    if test "$changelog_exact_commit_message" = true; then
+        for group in breaking features fixes performance; do : > "$state/$group"; done
+        release_messages true
+    fi
     test -n "$heading" || fail 'Changelog heading must not be empty.'
     if test -n "$target"; then
         raw_changelog=$state/raw-changelog
