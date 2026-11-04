@@ -200,14 +200,18 @@ update() (
             }
             END {
                 # Prefer the next existing option, then the previous one.
-                # Keep trailing project comments at the end of the file.
+                # Keep leading comments with the next option and trailing comments at the end.
                 for (i = 1; i <= options; i++) {
                     name = names[i]
                     if (name in present) { previous = present[name]; continue }
                     if (added[name]++) continue
                     position = previous ? previous + 1 : count + 1
                     for (j = i + 1; j <= options; j++) {
-                        if (names[j] in present) { position = present[names[j]]; break }
+                        if (names[j] in present) {
+                            position = present[names[j]]
+                            while (position > 1 && lines[position - 1] ~ /^[ \t]*#/) position--
+                            break
+                        }
                     }
                     insert[position] = insert[position] defaults[i] cr "\n"
                 }
