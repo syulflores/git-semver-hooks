@@ -16,7 +16,7 @@ Dependency-free Conventional Commit releases using Git and its POSIX shell (incl
 For multiple repositories, set this alias once per computer instead of the local alias above:
 
 ```sh
-git config --global alias.semver '!f() { if test -f .githooks/semver; then sh .githooks/semver "$@"; fi; }; f'
+git --% config --global alias.semver "!f() { if test -f .githooks/semver; then sh .githooks/semver \"$@\"; fi; }; f"
 ```
 
 Then run only `git semver --install` once per clone after adding or pulling the hook files. The global alias silently skips repositories without `.githooks/semver`; it does not enable hooks automatically.
