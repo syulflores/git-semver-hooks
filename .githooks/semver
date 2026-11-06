@@ -262,11 +262,12 @@ install_keys='alias.semver core.hooksPath semver.enabled push.followTags'
 installed_alias='!f() { p=$(git rev-parse --git-path semver-release/engine) || return; test -f "$p" || p=.githooks/semver; sh "$p" "$@"; }; f'
 
 is_semver_alias() {
-    # Compare known bootstrap commands without shell quoting or whitespace.
+    # Compare bootstrap commands without shell quoting, whitespace, or a final ;.
     # Never evaluate an existing alias while checking it.
     normalized_alias=$(printf '%s' "$1" | tr -d '[:space:]\042\047\134')
+    normalized_alias=${normalized_alias%;}
     case "$normalized_alias" in
-        '!sh.githooks/semver'|'!f(){iftest-f.githooks/semver;thensh.githooks/semver$@;fi;};f'|*semver-release/engine*) return 0 ;;
+        '!sh.githooks/semver'|'!sh.githooks/semver$@'|'!f(){iftest-f.githooks/semver;thensh.githooks/semver;fi;};f'|'!f(){iftest-f.githooks/semver;thensh.githooks/semver$@;fi;};f'|*semver-release/engine*) return 0 ;;
         *) return 1 ;;
     esac
 }

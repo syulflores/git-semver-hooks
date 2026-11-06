@@ -21,6 +21,10 @@ git --% config --global alias.semver "!f() { if test -f .githooks/semver; then s
 
 Then run only `git semver --install` once per clone after adding or pulling the hook files. The global alias silently skips repositories without `.githooks/semver`; it does not enable hooks automatically.
 
+On Windows, run `activate-semver.bat` to configure the global alias and search the current user's Documents, Downloads, Desktop, and OneDrive folders (including redirected Windows folder locations). It installs hooks in repositories containing `.githooks/semver`, lists successful installations, skipped repositories, and errors, then prompts for another parent folder to search. Press Enter to finish.
+
+The batch file is self-contained and uses built-in Windows PowerShell internally. You can keep it anywhere. To search a specific parent folder instead, run `activate-semver.bat "C:\Projects"`. Add `-NoPrompt` to skip the final prompt. It replaces a different global `semver` alias with the guarded alias above, skips `.git`, `node_modules`, and directory links, and avoids duplicate installations within a run. Installation and folder-read failures return a nonzero exit code.
+
 The installer enables `post-commit`, `pre-push`, `post-index-change`, automatic annotated-tag pushing, and a recovery-aware `git semver` alias. No wrapper, PowerShell script, profile change, or per-terminal setup is needed. New clones require installation again. Git supplies the shell for aliases even when `sh` is absent from PowerShell's PATH.
 
 ## Uninstall
