@@ -105,7 +105,8 @@ If an ordinary push published the branch but rejected the tag, run `git semver -
 
 ```sh
 git semver                 # Show help
-git semver --help
+git semver -h              # Show help (--help is intercepted by Git)
+git semver --version       # Show the hooks version
 git semver --install       # Enable hooks for this clone
 git semver --update        # Check the source and update hooks and the release workflow
 git semver --uninstall     # Restore local Git settings and disable these hooks
@@ -113,6 +114,8 @@ git semver --sync          # Synchronize and refresh the release draft; do not p
 git semver --continue      # Resume the interrupted operation
 git semver --abort         # Cancel the interrupted operation
 ```
+
+Short options: `-h` (help), `-v` (version), `-i` (install), `-u` (update), `-U` (uninstall), `-s` (sync), `-c` (continue), and `-a` (abort). Options are case-sensitive; choose one per invocation and do not combine short options. Help and version run before project configuration or recovery is loaded. Run `git semver --install` to refresh an existing clone's alias so these options also reach the current script during active recovery.
 
 `git semver --update` checks the source repository's default branch using Git. It replaces changed hook scripts and `.github/workflows/release.yml`, including customizations to their implementation. It also checks `.githooks/semver.conf` and `.github/workflows/release.conf` for missing options and inserts them with the source defaults beside their neighboring options in the source template. Existing values (including empty values), comments, and formatting are preserved; commented-out options count as missing. Repeating an update does not add duplicates. Previous files, including changed configs, are saved under the Git directory in `semver-update-backup.*`. Your `.gitattributes`, version, changelog, and other project files are retained. Review and commit the updated files. Finish active recovery, rebases, and merges before updating.
 

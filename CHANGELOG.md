@@ -2,6 +2,10 @@
 
 All notable changes are documented here automatically by git-semver-hooks.
 
+## 0.24.1
+
+- fix: added abbreviations to the semver commands
+
 ## 0.24.0
 
 - feat: updated install to create changelog and version files and update gitattributes and semver conf files

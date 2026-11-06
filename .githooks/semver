@@ -1,13 +1,40 @@
 #!/bin/sh
 # Manual installation, updates, uninstallation, synchronization, and recovery.
 set -eu
-semver_version='0.24.0'
-# Report the distributed script version before loading project configuration or recovery.
-if test "${1:-}" = --version; then
-    test "$#" -eq 1 || { echo 'SemVer: Unexpected version arguments.' >&2; exit 1; }
-    printf 'git-semver-hooks %s\n' "$semver_version"
-    exit 0
-fi
+semver_version='0.24.1'
+
+usage() {
+    cat <<'EOF'
+Usage: git semver [OPTION]
+
+Manage SemVer hooks and recover interrupted release synchronization.
+Choose one option per invocation; no arguments prints this help.
+
+  -h, --help       Show this help and exit.
+  -v, --version    Show the hooks script version (not the product version).
+  -i, --install    Enable hooks for this clone and initialize missing project files.
+  -u, --update     Update hook scripts from the source repository's default branch.
+  -U, --uninstall  Restore saved local Git settings and disable these hooks.
+  -s, --sync       Synchronize history and prepare a release, or resume active work.
+  -c, --continue   Resume synchronization after resolving and staging conflicts.
+  -a, --abort      Abort active work, retaining completed synchronization.
+
+Use git semver -h: Git intercepts git semver --help and displays the alias.
+Short options are case-sensitive and cannot be combined.
+EOF
+}
+
+# Help and version do not require project configuration, recovery, or a lock.
+case "${1:-}" in
+    ''|-h|--help)
+        test "$#" -le 1 || { echo 'SemVer: Unexpected help arguments.' >&2; exit 1; }
+        usage; exit 0 ;;
+    -v|--version)
+        test "$#" -eq 1 || { echo 'SemVer: Unexpected version arguments.' >&2; exit 1; }
+        printf 'git-semver-hooks %s\n' "$semver_version"; exit 0 ;;
+    -i|--install|-u|--update|-U|--uninstall|-s|--sync|-c|--continue|-a|--abort|--auto-continue) ;;
+    *) printf 'SemVer: Unknown option: %s\n' "$1" >&2; usage >&2; exit 1 ;;
+esac
 # Update from the source repository's default branch, independently of origin.
 update_source=https://github.com/syulflores/git-semver-hooks.git
 root=$(git rev-parse --show-toplevel)
@@ -32,7 +59,7 @@ SEMVER_LOAD_FUNCTIONS=1
 unset SEMVER_LOAD_FUNCTIONS
 trap semver_unlock 0
 semver_init
-case "${1:-}" in ''|--help) ;; *) semver_lock "${1:-}" ;; esac
+semver_lock "$1"
 
 initialize_project_files() {
     # The dispatcher stores the hooks version, not the installed product version.
@@ -79,10 +106,6 @@ initialize_project_files() {
         fi
     done
 
-}
-
-usage() {
-    echo 'Usage: git semver [--version|--install|--update|--uninstall|--sync|--continue|--abort|--help]'
 }
 
 # Migrate the old top-level env block without executing YAML as shell code.
@@ -320,7 +343,7 @@ update() (
 # Configuration belongs to the common Git directory, including in worktrees.
 install_dir=$(cd "$(git rev-parse --git-common-dir)" && pwd)/semver-install
 install_keys='alias.semver core.hooksPath semver.enabled push.followTags'
-installed_alias='!f() { p=$(git rev-parse --git-path semver-release/engine) || return; if test "${1:-}" = --version || test ! -f "$p"; then p=.githooks/semver; fi; sh "$p" "$@"; }; f'
+installed_alias='!f() { p=$(git rev-parse --git-path semver-release/engine) || return; case "${1:-}" in ""|-h|--help|-v|--version|-i|-u|-U|-s|-c|-a) p=.githooks/semver ;; esac; if test ! -f "$p"; then p=.githooks/semver; fi; sh "$p" "$@"; }; f'
 
 is_semver_alias() {
     # Compare bootstrap commands without shell quoting, whitespace, or a final ;.
@@ -554,8 +577,7 @@ continue_operation() {
 }
 
 case "${1:-}" in
-    ''|--help) usage ;;
-    --install)
+    --install|-i)
         test "$#" -eq 1 || fail 'Unexpected install arguments.'
         test ! -d "$state" || fail 'Finish or abort the active operation first.'
         test ! -d "$gitdir/semantic-version-sync" && test ! -f "$gitdir/semantic-version-pending" || fail 'Finish recovery with the old hooks before migrating.'
@@ -582,9 +604,9 @@ case "${1:-}" in
         echo 'SemVer hooks enabled for this clone. Commit and push normally.'
         ;;
     # The dispatcher may have replaced itself; do not read from it again.
-    --update) update "$@"; exit ;;
-    --uninstall) uninstall "$@" ;;
-    --sync)
+    --update|-u) update "$@"; exit ;;
+    --uninstall|-U) uninstall "$@" ;;
+    --sync|-s)
         test "$#" -eq 1 || fail 'Unexpected sync arguments.'
         if test -d "$state"; then continue_operation
         else start; fi
@@ -599,8 +621,8 @@ case "${1:-}" in
         echo 'SemVer: all conflicts staged; continuing automatically.'
         continue_operation
         ;;
-    --continue) test "$#" -eq 1 || fail 'Unexpected continue arguments.'; continue_operation ;;
-    --abort)
+    --continue|-c) test "$#" -eq 1 || fail 'Unexpected continue arguments.'; continue_operation ;;
+    --abort|-a)
         test "$#" -eq 1 || fail 'Unexpected abort arguments.'
         test -d "$state" || fail 'No operation is active.'
         load_transaction
