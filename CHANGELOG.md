@@ -2,6 +2,10 @@
 
 All notable changes are documented here automatically by git-semver-hooks.
 
+## 0.24.3
+
+- fix: removed obsolete version file
+
 ## 0.24.2
 
 - fix: updated readme to be easier to read
