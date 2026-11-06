@@ -1,7 +1,7 @@
 #!/bin/sh
 # Manual installation, updates, uninstallation, synchronization, and recovery.
 set -eu
-semver_version='0.0.0'
+semver_version='0.23.0'
 # Report the distributed script version before loading project configuration or recovery.
 if test "${1:-}" = --version; then
     test "$#" -eq 1 || { echo 'SemVer: Unexpected version arguments.' >&2; exit 1; }
