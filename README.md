@@ -5,7 +5,7 @@ Dependency-free Conventional Commit releases using Git and its POSIX shell (incl
 ## Install
 
 1. Copy `.githooks`, `.github`, and `.gitattributes` into your project. Merge existing files; do not copy `.git`, this README, or this template's release history.
-2. Configure `.githooks/semver.conf` and `.github/workflows/release.conf`. Commit the settings and starting version file in a `chore:` commit. The remote branch's version is the release baseline.
+2. Configure `.githooks/semver.conf` and `.github/workflows/release.conf` for your product. For a root `VERSION` file, set `version_file=VERSION` and clear `version_field=`; this repository itself uses an embedded hooks version. Commit the settings and starting version file in a `chore:` commit. The remote branch's version is the release baseline.
 3. Run once per clone, in PowerShell or Git Bash:
 
    ```sh
@@ -124,8 +124,8 @@ Edit shell variables in `.githooks/semver.conf`. Use quotes for spaces and `''` 
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `version_file` | `VERSION` | Repository-relative plain-text or JSON file. |
-| `version_field` | Empty | Empty for plain text; otherwise a unique JSON field name. |
+| `version_file` | `.githooks/semver` in this repository | Repository-relative plain-text, JSON, or embedded version file. Set this to your own product file when copying the hooks. |
+| `version_field` | `semver_version='{version}'` in this repository | Empty for plain text; a unique JSON field name for JSON; or a literal full-line template containing exactly one `{version}` placeholder for embedded versions. |
 | `tag_prefix` | `v` | Must match `TAG_PREFIX` in `.github/workflows/release.conf`. |
 | `commit_version` | `false` | Insert `[<release tag>]` after the subject colon (or at the start for ordinary subjects); uses `tag_prefix`. |
 | `changelog_exact_commit_message` | `false` | Include full qualifying commit messages (subject and body) in changelog entries and tag notes, retaining generated version labels. With `commit_version=true`, the latest entry includes its new release tag. Bodies are indented under their bullet; trailing blank lines are omitted. |
@@ -144,7 +144,9 @@ Edit shell variables in `.githooks/semver.conf`. Use quotes for spaces and `''` 
 
 For example, set `changelog_fixes_title='Bug fixes'` to include `### Bug fixes` above fix entries. Leave a title empty to omit that heading. Headings only appear when their category has entries.
 
-Plain-text version files contain only `X.Y.Z`. For JSON, set `version_file=manifest.json` and `version_field=version`. The field must appear exactly once on its own line:
+This repository uses its own hooks to update `semver_version` inside `.githooks/semver`. Run `git semver --version` to see the installed hooks version, independently of your product version. The starting hooks version is `0.0.0`; qualifying commits advance it after installation.
+
+When copying the hooks into another repository, configure its product version. For a plain-text version file containing only `X.Y.Z`, set `version_file=VERSION` and `version_field=`. For JSON, set `version_file=manifest.json` and `version_field=version`. The field must appear exactly once on its own line:
 
 ```json
 {
@@ -153,7 +155,11 @@ Plain-text version files contain only `X.Y.Z`. For JSON, set `version_file=manif
 }
 ```
 
-Nested fields work by their unique name, not a dotted path. Unrelated JSON fields are preserved. Manual version or changelog edits produce a warning and are kept in the commit and push. A manually chosen version must use `X.Y.Z` and becomes the release tag's version. A manually edited changelog is kept as written. These overrides remain in effect for subsequent commits in the same unpublished release; tag notes still collect qualifying commit messages. After publication, automatic updates resume from the published version and changelog. Synchronization preserves manual edits, so conflicts involving those edits require resolution. Commits with no release-triggering changes and no active draft do not regenerate metadata.
+For a version embedded in another text file, set `version_field` to a literal full-line template, for example `version_field="semver_version='{version}'"`. The file must contain exactly one matching line such as `semver_version='1.2.3'`. Only `X.Y.Z` values match. Everything around `{version}` is literal, including indentation and quotes; this is not a regular expression. Other lines and CRLF endings are preserved when replacing the value. Patterns cannot span lines. Synchronization restores only the generated version, preserving other edits in that file.
+
+Updates preserve your existing `version_field` setting, including an explicitly empty value.
+
+Nested JSON fields work by their unique name, not a dotted path. Unrelated JSON fields are preserved. Manual version or changelog edits produce a warning and are kept in the commit and push. A manually chosen version must use `X.Y.Z` and becomes the release tag's version. A manually edited changelog is kept as written. These overrides remain in effect for subsequent commits in the same unpublished release; tag notes still collect qualifying commit messages. After publication, automatic updates resume from the published version and changelog. Synchronization preserves manual edits, so conflicts involving those edits require resolution. Commits with no release-triggering changes and no active draft do not regenerate metadata.
 
 Edit shell variables in `.github/workflows/release.conf` to control publishing. This file is retained by `git semver --update`.
 

@@ -1,6 +1,13 @@
 #!/bin/sh
 # Manual installation, updates, uninstallation, synchronization, and recovery.
 set -eu
+semver_version='0.0.0'
+# Report the distributed script version before loading project configuration or recovery.
+if test "${1:-}" = --version; then
+    test "$#" -eq 1 || { echo 'SemVer: Unexpected version arguments.' >&2; exit 1; }
+    printf 'git-semver-hooks %s\n' "$semver_version"
+    exit 0
+fi
 # Update from the source repository's default branch, independently of origin.
 update_source=https://github.com/syulflores/git-semver-hooks.git
 root=$(git rev-parse --show-toplevel)
@@ -28,7 +35,7 @@ semver_init
 case "${1:-}" in ''|--help) ;; *) semver_lock "${1:-}" ;; esac
 
 usage() {
-    echo 'Usage: git semver [--install|--update|--uninstall|--sync|--continue|--abort|--help]'
+    echo 'Usage: git semver [--version|--install|--update|--uninstall|--sync|--continue|--abort|--help]'
 }
 
 # Migrate the old top-level env block without executing YAML as shell code.
@@ -165,6 +172,13 @@ update() (
         defaults=$update_tmp/defaults
         git -C "$update_tmp/source" show "FETCH_HEAD:$file" > "$defaults" 2>/dev/null ||
             fail "The source is missing $file."
+        # This repository versions its dispatcher. New project options must
+        # retain the historical plain-text defaults instead of opting into that.
+        if test "$file" = .githooks/semver.conf; then
+            sed -e 's/^version_file=.*/version_file=VERSION/' \
+                -e 's/^version_field=.*/version_field=/' "$defaults" > "$update_tmp/project-defaults"
+            mv "$update_tmp/project-defaults" "$defaults"
+        fi
         sh -n "$defaults" || fail "The source contains invalid configuration: $file."
         mkdir -p "$update_tmp/files/$(dirname "$file")"
         candidate=$update_tmp/files/$file
@@ -259,7 +273,7 @@ update() (
 # Configuration belongs to the common Git directory, including in worktrees.
 install_dir=$(cd "$(git rev-parse --git-common-dir)" && pwd)/semver-install
 install_keys='alias.semver core.hooksPath semver.enabled push.followTags'
-installed_alias='!f() { p=$(git rev-parse --git-path semver-release/engine) || return; test -f "$p" || p=.githooks/semver; sh "$p" "$@"; }; f'
+installed_alias='!f() { p=$(git rev-parse --git-path semver-release/engine) || return; if test "${1:-}" = --version || test ! -f "$p"; then p=.githooks/semver; fi; sh "$p" "$@"; }; f'
 
 is_semver_alias() {
     # Compare bootstrap commands without shell quoting, whitespace, or a final ;.
