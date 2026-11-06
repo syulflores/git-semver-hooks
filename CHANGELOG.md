@@ -2,6 +2,10 @@
 
 All notable changes are documented here automatically by git-semver-hooks.
 
+## 0.24.0
+
+- feat: updated install to create changelog and version files and update gitattributes and semver conf files
+
 ## 0.23.0
 
 - feat: added semantic versioning with git-semver-hooks

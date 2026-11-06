@@ -4,14 +4,16 @@ Dependency-free Conventional Commit releases using Git and its POSIX shell (incl
 
 ## Install
 
-1. Copy `.githooks`, `.github`, and `.gitattributes` into your project. Merge existing files; do not copy `.git`, this README, or this template's release history.
-2. Configure `.githooks/semver.conf` and `.github/workflows/release.conf` for your product. For a root `VERSION` file, set `version_file=VERSION` and clear `version_field=`; this repository itself uses an embedded hooks version. Commit the settings and starting version file in a `chore:` commit. The remote branch's version is the release baseline.
+1. Copy `.githooks` into your project. Also copy `.github` for GitHub release publishing. Merge existing files; do not copy `.git`, this README, or this template's release history.
+2. Review `.githooks/semver.conf` and, if copied, `.github/workflows/release.conf` for your product. Whenever `version_file=.githooks/semver`, installation switches to `version_file=VERSION` and clears `version_field`, regardless of its previous value. The dispatcher stores the hooks version; use a separate file for your product version. Settings for other version-file paths are preserved. The remote branch's version is the release baseline.
 3. Run once per clone, in PowerShell or Git Bash:
 
    ```sh
    git config --local alias.semver '!sh .githooks/semver'
    git semver --install
    ```
+
+Installation creates the configured version file from `initial_version` and the configured changelog from `changelog_heading` only when those files are missing, including their parent folders. Existing files are preserved. A missing embedded version source is initialized with its configured full-line template or a minimal JSON object for a JSON field. Installation also creates `.gitattributes` if missing and appends any missing distribution rules (`.githooks/* text eol=lf` and `.github/workflows/release.conf text eol=lf`). Repeated installation does not duplicate those rules. Review and commit the configuration and initialized files in a `chore:` commit; installation does not stage or commit them.
 
 For multiple repositories, set this alias once per computer instead of the local alias above:
 

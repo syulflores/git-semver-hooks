@@ -1,7 +1,7 @@
 #!/bin/sh
 # Manual installation, updates, uninstallation, synchronization, and recovery.
 set -eu
-semver_version='0.23.0'
+semver_version='0.24.0'
 # Report the distributed script version before loading project configuration or recovery.
 if test "${1:-}" = --version; then
     test "$#" -eq 1 || { echo 'SemVer: Unexpected version arguments.' >&2; exit 1; }
@@ -33,6 +33,53 @@ unset SEMVER_LOAD_FUNCTIONS
 trap semver_unlock 0
 semver_init
 case "${1:-}" in ''|--help) ;; *) semver_lock "${1:-}" ;; esac
+
+initialize_project_files() {
+    # The dispatcher stores the hooks version, not the installed product version.
+    # Custom version sources are left as configured.
+    if test "$version_file" = .githooks/semver; then
+        test ! -L "$config" || fail 'Cannot initialize symbolic link semver.conf.'
+        awk '
+            /^[ \t]*version_file=/ { cr = sub(/\r$/, ""); sub(/=.*/, "=VERSION" (cr ? "\r" : "")) }
+            /^[ \t]*version_field=/ { cr = sub(/\r$/, ""); sub(/=.*/, "=" (cr ? "\r" : "")) }
+            { print }
+        ' "$config" > "$lock/git-config"
+        cat "$lock/git-config" > "$config"
+        rm -f "$lock/git-config"
+        semver_init
+    fi
+    # Keep existing project content intact, including on repeated installation.
+    for file in "$version_file" "$changelog_file" .gitattributes; do
+        test ! -L "$file" || fail "Cannot initialize symbolic link $file."
+        test ! -e "$file" || test -f "$file" || fail "Cannot initialize non-file $file."
+    done
+    if test ! -e "$version_file"; then
+        next_version "$initial_version" '' >/dev/null || fail 'Invalid initial_version.'
+        mkdir -p "$(dirname "$version_file")"
+        case "$version_field" in
+            *'{version}'*)
+                printf '%s%s%s\n' "${version_field%%\{version\}*}" "$initial_version" "${version_field#*\{version\}}" > "$version_file"
+                ;;
+            '') printf '%s\n' "$initial_version" > "$version_file" ;;
+            *) printf '{\n  "%s": "%s"\n}\n' "$version_field" "$initial_version" > "$version_file" ;;
+        esac
+    fi
+    if test ! -e "$changelog_file"; then
+        mkdir -p "$(dirname "$changelog_file")"
+        printf '%b\n' "$changelog_heading" > "$changelog_file"
+    fi
+    # These distribution rules live here so copying .githooks is sufficient.
+    for rule in '.githooks/* text eol=lf' '.github/workflows/release.conf text eol=lf'; do
+        if test ! -f .gitattributes || ! tr -d '\r' < .gitattributes | grep -Fxq "$rule"; then
+            # Separate the rule from an existing final line without a newline.
+            if test -s .gitattributes && test -n "$(tail -c 1 .gitattributes)"; then
+                printf '\n' >> .gitattributes
+            fi
+            printf '%s\n' "$rule" >> .gitattributes
+        fi
+    done
+
+}
 
 usage() {
     echo 'Usage: git semver [--version|--install|--update|--uninstall|--sync|--continue|--abort|--help]'
@@ -525,6 +572,7 @@ case "${1:-}" in
         if test -z "$existing" && git --list-cmds=main,others | grep -Fxq semver; then fail 'A git-semver command already exists.'; fi
         hooks=$(git config --get core.hooksPath || :)
         case "$hooks" in ''|.githooks|/dev/null|nul) ;; *) fail 'An existing hooksPath needs to be integrated manually.' ;; esac
+        initialize_project_files
         save_install_config
         git config --local --replace-all alias.semver "$installed_alias"
         git config --local --replace-all core.hooksPath .githooks
