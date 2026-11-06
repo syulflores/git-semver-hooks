@@ -2,6 +2,10 @@
 
 All notable changes are documented here automatically by git-semver-hooks.
 
+## 0.24.2
+
+- fix: updated readme to be easier to read
+
 ## 0.24.1
 
 - fix: added abbreviations to the semver commands

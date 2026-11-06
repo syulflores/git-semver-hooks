@@ -1,33 +1,48 @@
-# Git SemVer Hooks
+﻿# Git SemVer Hooks
 
-Dependency-free Conventional Commit releases using Git and its POSIX shell (included with Git for Windows). Version and changelog changes are amended into your own commit. CI publishes releases without adding a release commit or requiring a pull afterward.
+Automate Conventional Commit releases with Git and its POSIX shell, included with Git for Windows. Version and changelog updates become part of your commit. CI publishes releases without a separate release commit or a follow-up pull. No extra dependencies are needed.
 
 ## Install
 
-1. Copy `.githooks` into your project. Also copy `.github` for GitHub release publishing. Merge existing files; do not copy `.git`, this README, or this template's release history.
-2. Review `.githooks/semver.conf` and, if copied, `.github/workflows/release.conf` for your product. Whenever `version_file=.githooks/semver`, installation switches to `version_file=VERSION` and clears `version_field`, regardless of its previous value. The dispatcher stores the hooks version; use a separate file for your product version. Settings for other version-file paths are preserved. The remote branch's version is the release baseline.
-3. Run once per clone, in PowerShell or Git Bash:
+1. Copy `.githooks` into your project. For GitHub releases, also copy `.github`. Only those two files are needed.
+2. Review `.githooks/semver.conf` and, if copied, `.github/workflows/release.conf`. Choose a product version file.
+3. Run once per clone in PowerShell or Git Bash:
 
    ```sh
    git config --local alias.semver '!sh .githooks/semver'
    git semver --install
    ```
 
-Installation creates the configured version file from `initial_version` and the configured changelog from `changelog_heading` only when those files are missing, including their parent folders. Existing files are preserved. A missing embedded version source is initialized with its configured full-line template or a minimal JSON object for a JSON field. Installation also creates `.gitattributes` if missing and appends any missing distribution rules (`.githooks/* text eol=lf` and `.github/workflows/release.conf text eol=lf`). Repeated installation does not duplicate those rules. Review and commit the configuration and initialized files in a `chore:` commit; installation does not stage or commit them.
-
-For multiple repositories, set this alias once per computer instead of the local alias above:
+For multiple repositories, use this global alias once per computer instead of the local alias above:
 
 ```sh
 git --% config --global alias.semver "!f() { if test -f .githooks/semver; then sh .githooks/semver \"$@\"; fi; }; f"
 ```
 
-Then run only `git semver --install` once per clone after adding or pulling the hook files. The global alias silently skips repositories without `.githooks/semver`; it does not enable hooks automatically.
+Installation creates missing version and changelog files, including parent folders, using `initial_version` and `changelog_heading`. Missing embedded version files use the full-line template; JSON files start with a minimal object. Existing files are kept.
 
-On Windows, run `activate-semver.bat` to configure the global alias and search the current user's Documents, Downloads, Desktop, and OneDrive folders (including redirected Windows folder locations). It installs hooks in repositories containing `.githooks/semver`, lists successful installations, skipped repositories, and errors, then prompts for another parent folder to search. Press Enter to finish.
+It also creates `.gitattributes` if needed and adds missing rules once:
 
-The batch file is self-contained and uses built-in Windows PowerShell internally. You can keep it anywhere. To search a specific parent folder instead, run `activate-semver.bat "C:\Projects"`. Add `-NoPrompt` to skip the final prompt. It replaces a different global `semver` alias with the guarded alias above, skips `.git`, `node_modules`, and directory links, and avoids duplicate installations within a run. Installation and folder-read failures return a nonzero exit code.
+```gitattributes
+.githooks/* text eol=lf
+.github/workflows/release.conf text eol=lf
+```
 
-The installer enables `post-commit`, `pre-push`, `post-index-change`, automatic annotated-tag pushing, and a recovery-aware `git semver` alias. No wrapper, PowerShell script, profile change, or per-terminal setup is needed. New clones require installation again. Git supplies the shell for aliases even when `sh` is absent from PowerShell's PATH.
+Review and commit the configuration and new files with a `chore:` commit. Installation does not stage or commit files.
+
+Then run `git semver --install` once per clone after adding or pulling the hooks. The global alias silently skips repositories without `.githooks/semver`; it does not activate hooks itself.
+
+On Windows, `activate-semver.bat` sets the global alias and searches Documents, Downloads, Desktop, and OneDrive, including redirected folders. It installs hooks wherever it finds `.githooks/semver`, reports successes, skips, and errors, then asks for another folder. Press Enter to finish.
+
+The batch file works from any location using built-in Windows PowerShell. To search another folder, run:
+
+```bat
+activate-semver.bat "C:\Projects"
+```
+
+Add `-NoPrompt` to skip the final prompt. It replaces a different global `semver` alias, skips `.git`, `node_modules`, and directory links, and installs each repository once per run. Installation or folder-read failures return a nonzero exit code.
+
+Installation enables `post-commit`, `pre-push`, `post-index-change`, annotated-tag pushing, and a recovery-aware `git semver` alias. No wrapper, separate PowerShell script, profile edit, or terminal setup is needed. Install again for each new clone. Git supplies the alias shell even if PowerShell cannot find `sh`.
 
 ## Uninstall
 
@@ -35,11 +50,11 @@ The installer enables `post-commit`, `pre-push`, `post-index-change`, automatic 
 git semver --uninstall
 ```
 
-Restores the previous local Git settings saved by `--install` and removes the setup alias. Settings changed after installation are kept. Reinstalling preserves the original backup. Finish or abort any active synchronization first.
+Finish or abort synchronization first. Uninstall restores the local Git settings saved during installation and removes the setup alias. It keeps settings changed since installation. Reinstalling keeps the original backup.
 
-Installations made before backup support remove only recognized local SemVer settings; their previous values cannot be recovered automatically. Global settings are unchanged. If a restored or inherited `core.hooksPath=.githooks` would keep these hooks active, uninstall disables hooks with a local null-device override (`/dev/null`, or `nul` with Git for Windows).
+Older installations without backups remove only recognized local SemVer settings; previous values cannot be restored automatically. Global settings stay unchanged. If a restored or inherited `core.hooksPath=.githooks` would leave hooks active, uninstall disables them locally using `/dev/null` (`nul` on Git for Windows).
 
-Files, commits, tags, and local release records are retained. To remove the shared automation files too, remove `.githooks` and `.github/workflows/release.yml` manually, preserving any unrelated hooks or workflow actions. The GitHub release workflow remains active until removed. To enable hooks again, repeat the installation steps.
+Files, commits, tags, and local release records are kept. To remove shared automation, manually remove `.githooks` and `.github/workflows/release.yml`, keeping unrelated hooks and workflow actions. The GitHub workflow stays active until removed. Repeat installation to re-enable hooks.
 
 ## Daily workflow
 
@@ -49,19 +64,19 @@ git commit -m "fix: correct a bug"
 git push
 ```
 
-`post-commit` fetches the tracking remote once, uses its version as the baseline, generates the version and grouped changelog, amends the current commit, and creates its provisional annotated tag. If the remote is ahead, its changelog supplies the published history; local code stays in place until `git semver --sync` integrates it. Internal amendments disable hooks to prevent recursion.
+After a commit, `post-commit` fetches the tracking remote once, uses its version as the baseline, updates the version and grouped changelog, amends your commit, and creates a draft annotated tag. If the remote is ahead, its changelog supplies the published history. Your code stays in place until `git semver --sync` integrates it. Internal amendments disable hooks to avoid recursion.
 
-`post-commit` contains the release functions and runs automatic commit preparation. The `semver` script handles manual commands and loads only the function definitions from `post-commit`; loading them does not run automatic commit preparation. Ordinary commits do not invoke `semver`. Active recovery snapshots include both scripts and the configuration so synchronization can resume after a rebase checks out older hook files.
+Release functions live in `post-commit`, which prepares ordinary commits directly. Manual `semver` commands load those functions without triggering automatic preparation. Recovery saves both scripts and the configuration so synchronization can resume even if a rebase checks out older hooks.
 
-Several commits before a push share one provisional release. From `1.2.3`, two fixes keep the draft at `1.2.4`; adding a feature changes it to `1.3.0`. The notes contain all qualifying commits since the published release. The provisional tag follows the latest commit; only tags recorded by this clone as unpublished drafts are moved. Published and unrelated tags are preserved.
+Commits made before a push share one draft release. From `1.2.3`, two fixes produce `1.2.4`; adding a feature changes it to `1.3.0`. Notes include all qualifying commits since publication. The draft tag follows the latest commit. Only unpublished draft tags recorded by this clone are moved; published and unrelated tags are kept.
 
-Set `commit_version=true` in `.githooks/semver.conf` to include the release tag after the colon in the latest release commit's subject, for example `fix: [v1.2.4] correct a bug`. Subjects without a Conventional Commit prefix get the label at the start. This is off by default. The message body is preserved. Refreshing a draft replaces its generated label; synchronization removes generated labels from unpublished history before rebuilding the release. Earlier commits in a draft can show provisional versions until synchronization; the tagged commit carries the release version.
+Set `commit_version=true` to label the latest release commit, for example `fix: [v1.2.4] correct a bug`. Ordinary subjects get the label at the start. This defaults to off and preserves the message body. Refreshing a draft replaces its generated label. Synchronization removes generated labels from unpublished history before rebuilding. Earlier draft commits may show provisional versions until then; the tagged commit carries the release version.
 
-`pre-push` compares the prepared branch baseline with the remote ID Git already supplies to the hook, checks the selected commit and release tag, then lets Git push. It makes no network calls and does not change files or start another push. `push.followTags=true` includes the annotated release tag with an ordinary push. Repeating a successful push does not increment the version.
+Before pushing, `pre-push` checks the prepared baseline against the remote ID supplied by Git, plus the selected commit and release tag. It makes no network calls, changes no files, and starts no extra push. `push.followTags=true` includes the annotated tag. Repeating a successful push does not change the version.
 
-If the destination branch changes between commit and push, or local code still needs integration, push stops with instructions to run `git semver --sync`, then retry `git push`. A conflicting release tag also blocks publication. Unrelated remote branches and tags no longer invalidate preparation. Git checks the refs again on the server, covering changes after the hook runs.
+If the destination branch changed or your code needs integration, push stops: run `git semver --sync`, then retry `git push`. A conflicting release tag also blocks publication. Unrelated remote branches and tags do not invalidate preparation. Git checks refs again on the server for later changes.
 
-Ordinary `git push` does not guarantee an atomic branch-and-tag update. Use `git push --atomic` when you require both to succeed or fail together; the server must support it.
+For branch and tag updates that must succeed or fail together, use `git push --atomic`; the server must support it. An ordinary push does not guarantee this.
 
 | Commit message | Release impact |
 | --- | --- |
@@ -70,7 +85,7 @@ Ordinary `git push` does not guarantee an atomic branch-and-tag update. Use `git
 | Valid Conventional Commit with `!` or a `BREAKING CHANGE:` footer | Major |
 | `docs: ...`, `chore: ...`, ordinary messages | None by default |
 
-Scopes work, for example `fix(api): correct a bug`. Notes contain qualifying subjects as bullet points without category headings by default. Set the optional category titles in `.githooks/semver.conf` to add headings. Docs-only commits produce no release unless a release draft already exists; in that case its tag moves to the latest unpublished commit.
+Scopes work: `fix(api): correct a bug`. Notes list qualifying subjects as bullets. Optional category titles in `.githooks/semver.conf` add headings. Docs-only commits create no release, but move an existing draft's tag to the latest unpublished commit.
 
 ## Synchronization and conflicts
 
@@ -78,28 +93,36 @@ Scopes work, for example `fix(api): correct a bug`. Notes contain qualifying sub
 git semver --sync
 ```
 
-This fetches the remote, strips known generated metadata from unpublished history, rebases code onto the upstream, and rebuilds one release draft. Generated version/changelog changes therefore do not cause avoidable metadata conflicts. Published commits on any fetched branch or tag are never rewritten.
+Synchronization fetches the remote, removes known generated metadata from unpublished history, rebases code onto the upstream, and rebuilds one draft. This avoids conflicts from generated version/changelog changes. It never rewrites commits published on any fetched branch or tag.
 
-Code conflicts pause synchronization. An explicitly configured merge tool opens when an interactive terminal is available; otherwise use your editor or `git mergetool`. Resolve the files and mark them resolved in your merge manager, or stage them:
+Code conflicts pause synchronization. A configured merge tool opens in an interactive terminal; otherwise use your editor or `git mergetool`. Resolve files, then mark them resolved in your merge manager or stage them:
 
 ```sh
 git add <resolved-files>
 git push
 ```
 
-With `auto_continue=true` (the default), staging the last conflict automatically continues synchronization and rebuilds the release draft once there are no unstaged changes. If another commit conflicts, resolve and stage it too. Your merge manager must use Git's hooks when staging; saving a file alone does not trigger continuation. Set `auto_continue=false` before starting synchronization to require `git semver --continue` after staging instead. The manual command remains available for managers that bypass hooks.
+By default, `auto_continue=true` resumes synchronization after the last conflict is staged and no unstaged changes remain. Resolve and stage any further conflicts the same way. Your merge manager must run Git hooks when staging; saving alone does not resume. For manual continuation, set `auto_continue=false` before synchronization and run `git semver --continue` after staging. That command also works when managers bypass hooks.
 
-Automatic continuation finishes synchronization and prepares the release locally; run `git push` to publish. A commit hook's failure does not undo the original code commit: read its output. Pushes remain blocked until preparation succeeds. When working files or connectivity caused the failure, fix the problem and run `git semver --sync` to resume.
+Continuation prepares the release locally. Run `git push` to publish.
+
+A commit-hook failure leaves your original code commit intact. Read the output; push stays blocked until preparation succeeds. Fix working-file or connection problems, then run `git semver --sync`.
 
 ```sh
 git semver --abort
 ```
 
-Abort restores an active rebase and its original provisional tag. Completed synchronization is retained. An aborted, incompletely prepared code commit still needs `git semver --sync` before it can be pushed. Original commits remain protected by a private reference during active recovery.
+Abort restores an active rebase and its original draft tag; completed synchronization is kept. An incompletely prepared commit still needs `git semver --sync` before pushing. A private reference protects original commits during recovery.
 
-A rejected ordinary push retains its prepared commit and tag. Retry the push after fixing authentication or server policy; if remote history changed, synchronize first. No hook force-pushes or silently discards working files.
+A rejected push keeps the prepared commit and tag. Fix authentication or server-policy issues and retry; synchronize first if remote history changed. Hooks never force-push or silently discard working files.
 
-If an ordinary push published the branch but rejected the tag, run `git semver --sync` to confirm publication, follow its tag-only push command, then run `git semver --sync` again. The published release commit is retained. This check prevents Git from publishing a draft tag alone when it has omitted a rejected branch from the hook input.
+If the branch was published but its tag was rejected:
+
+1. Run `git semver --sync` to confirm publication.
+2. Follow its tag-only push command.
+3. Run `git semver --sync` again.
+
+The published release commit is kept. This check prevents publishing a draft tag alone if Git omits a rejected branch from the hook input.
 
 ## Commands
 
@@ -108,50 +131,65 @@ git semver                 # Show help
 git semver -h              # Show help (--help is intercepted by Git)
 git semver --version       # Show the hooks version
 git semver --install       # Enable hooks for this clone
-git semver --update        # Check the source and update hooks and the release workflow
-git semver --uninstall     # Restore local Git settings and disable these hooks
-git semver --sync          # Synchronize and refresh the release draft; do not push
-git semver --continue      # Resume the interrupted operation
-git semver --abort         # Cancel the interrupted operation
+git semver --update        # Update hooks and the release workflow from the source
+git semver --uninstall     # Restore local settings and disable hooks
+git semver --sync          # Synchronize and refresh the draft without pushing
+git semver --continue      # Resume an interrupted operation
+git semver --abort         # Cancel an interrupted operation
 ```
 
-Short options: `-h` (help), `-v` (version), `-i` (install), `-u` (update), `-U` (uninstall), `-s` (sync), `-c` (continue), and `-a` (abort). Options are case-sensitive; choose one per invocation and do not combine short options. Help and version run before project configuration or recovery is loaded. Run `git semver --install` to refresh an existing clone's alias so these options also reach the current script during active recovery.
+Short options: `-h` help, `-v` version, `-i` install, `-u` update, `-U` uninstall, `-s` sync, `-c` continue, `-a` abort. Options are case-sensitive; use one per command and do not combine them.
 
-`git semver --update` checks the source repository's default branch using Git. It replaces changed hook scripts and `.github/workflows/release.yml`, including customizations to their implementation. It also checks `.githooks/semver.conf` and `.github/workflows/release.conf` for missing options and inserts them with the source defaults beside their neighboring options in the source template. Existing values (including empty values), comments, and formatting are preserved; commented-out options count as missing. Repeating an update does not add duplicates. Previous files, including changed configs, are saved under the Git directory in `semver-update-backup.*`. Your `.gitattributes`, version, changelog, and other project files are retained. Review and commit the updated files. Finish active recovery, rebases, and merges before updating.
+Help and version run before loading configuration or recovery. Run `git semver --install` to refresh an existing alias so these options reach the current script during recovery.
 
-When `.github/workflows/release.conf` is missing, the updater creates it from the source defaults and migrates the four publishing settings from the old workflow's top-level `env:` block. Simple quoted strings and plain values are supported. Complex YAML or GitHub expressions stop the update before files are replaced; create the config manually and retry. Older copies of the updater do not perform this migration: create `.github/workflows/release.conf` with your settings before their first update, or recover the settings from the workflow backup afterward.
+### Updating
 
-When no files differ, it reports `SemVer: updated to the most recent version.` If the source cannot be reached or found, it reports `SemVer: can't find the source.` without showing the repository name or URL.
+`git semver --update` checks the source repository's default branch using Git. It replaces changed hook scripts and `.github/workflows/release.yml`, including custom code edits.
+
+For `.githooks/semver.conf` and `.github/workflows/release.conf`, it adds missing options beside their neighbors using source defaults. Existing values (even empty ones), comments, and formatting are kept. Commented-out options count as missing; repeated updates add no duplicates.
+
+Backups, including changed configs, go under the Git directory in `semver-update-backup.*`. Your `.gitattributes`, version, changelog, and other project files are kept. Finish recovery, rebases, and merges before updating; review and commit the updated files afterward.
+
+If `release.conf` is missing, the updater creates it and copies the four publishing settings from the old workflow's top-level `env:` block. Plain values and simple quoted strings work. Complex YAML or GitHub expressions stop the update before replacement; create the config manually and retry.
+
+Older updaters cannot migrate these settings. Create `release.conf` before their first update, or recover settings from the workflow backup afterward.
+
+If nothing differs, the message is `SemVer: updated to the most recent version.` If the source is unavailable or missing, it is `SemVer: can't find the source.` The error hides the repository name and URL.
 
 ## Configuration
 
-Edit shell variables in `.githooks/semver.conf`. Use quotes for spaces and `''` for an empty value.
+Edit shell variables in `.githooks/semver.conf`. Quote values containing spaces; use `''` for an empty value.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `version_file` | `.githooks/semver` in this repository | Repository-relative plain-text, JSON, or embedded version file. Set this to your own product file when copying the hooks. |
-| `version_field` | `semver_version='{version}'` in this repository | Empty for plain text; a unique JSON field name for JSON; or a literal full-line template containing exactly one `{version}` placeholder for embedded versions. |
-| `tag_prefix` | `v` | Must match `TAG_PREFIX` in `.github/workflows/release.conf`. |
-| `commit_version` | `false` | Insert `[<release tag>]` after the subject colon (or at the start for ordinary subjects); uses `tag_prefix`. |
-| `changelog_exact_commit_message` | `false` | Include full qualifying commit messages (subject and body) in changelog entries and tag notes, retaining generated version labels. With `commit_version=true`, the latest entry includes its new release tag. Bodies are indented under their bullet; trailing blank lines are omitted. |
-| `changelog_file` | `CHANGELOG.md` | Repository-relative changelog path. |
-| `changelog_heading` | Template heading | Header placed above generated releases; literal `\n` separates lines. |
-| `changelog_remove_extra_headings` | `true` | Remove existing Markdown top-level (`#`) titles and all introductory text below each title until the next heading (`##` through `######`), keeping the configured header. Set `false` to retain custom titles and introductions. Release and category headings and their contents are preserved. Applies when generating releases; manually preserved changelogs remain untouched. |
-| `changelog_breaking_title` | Empty | Optional heading for breaking changes. |
-| `changelog_features_title` | Empty | Optional heading for features. |
-| `changelog_fixes_title` | Empty | Optional heading for bug fixes. |
-| `changelog_performance_title` | Empty | Optional heading for performance improvements. |
+| `version_file` | `.githooks/semver` in this repository | Relative path to a plain-text, JSON, or embedded version file. Choose your product file when copying hooks. |
+| `version_field` | `semver_version='{version}'` in this repository | Empty for plain text; a unique field name for JSON; a literal full-line template with one `{version}` for embedded versions. |
+| `tag_prefix` | `v` | Must match `TAG_PREFIX` in `release.conf`. |
+| `commit_version` | `false` | Add `[<release tag>]` after the subject colon, or at the start for ordinary subjects. Uses `tag_prefix`. |
+| `changelog_exact_commit_message` | `false` | Use full qualifying messages in changelogs and tag notes, keeping generated version labels. With `commit_version=true`, the latest entry gets its new tag. Bodies are indented below bullets; trailing blank lines are removed. |
+| `changelog_file` | `CHANGELOG.md` | Relative changelog path. |
+| `changelog_heading` | Template heading | Header above releases. Use literal `\n` for line breaks. |
+| `changelog_remove_extra_headings` | `true` | When generating releases, replace existing `#` titles and introductions (up to the next `##`–`######` heading) with the configured header. Keep release/category headings and content. Set `false` to keep custom titles and introductions. Manually preserved changelogs are untouched. |
+| `changelog_breaking_title` | Empty | Optional breaking-changes heading. |
+| `changelog_features_title` | Empty | Optional features heading. |
+| `changelog_fixes_title` | Empty | Optional bug-fixes heading. |
+| `changelog_performance_title` | Empty | Optional performance heading. |
 | `patch_types` | `fix perf` | Space-separated patch commit types. |
 | `minor_types` | `feat` | Space-separated minor commit types. |
-| `allowed_branches` | `main` | Exact names separated by spaces; empty enables all branches. |
-| `auto_continue` | `true` | Automatically resume paused synchronization when all conflicts are staged and no unstaged changes remain; `false` requires `--continue`. |
+| `allowed_branches` | `main` | Space-separated exact branch names; empty allows all. |
+| `auto_continue` | `true` | Resume when all conflicts are staged and no unstaged changes remain. Set `false` to require `--continue`. |
 | `initial_version` | `0.0.0` | Baseline when no version exists. |
 
-For example, set `changelog_fixes_title='Bug fixes'` to include `### Bug fixes` above fix entries. Leave a title empty to omit that heading. Headings only appear when their category has entries.
+For example, `changelog_fixes_title='Bug fixes'` adds `### Bug fixes` above fix entries. Empty titles omit headings. A heading appears only when its category has entries.
 
-This repository uses its own hooks to update `semver_version` inside `.githooks/semver`. Run `git semver --version` to see the installed hooks version, independently of your product version. The starting hooks version is `0.0.0`; qualifying commits advance it after installation.
+This repository versions its hooks through `semver_version` in `.githooks/semver`, starting at `0.0.0` and advancing with qualifying commits after installation. `git semver --version` shows the hooks version separately from your product version.
 
-When copying the hooks into another repository, configure its product version. For a plain-text version file containing only `X.Y.Z`, set `version_file=VERSION` and `version_field=`. For JSON, set `version_file=manifest.json` and `version_field=version`. The field must appear exactly once on its own line:
+### Product version files
+
+When copying hooks, choose your product's version source:
+
+- Plain text containing only `X.Y.Z`: `version_file=VERSION` and `version_field=`.
+- JSON: `version_file=manifest.json` and `version_field=version`. The field must appear once, on its own line:
 
 ```json
 {
@@ -160,28 +198,36 @@ When copying the hooks into another repository, configure its product version. F
 }
 ```
 
-For a version embedded in another text file, set `version_field` to a literal full-line template, for example `version_field="semver_version='{version}'"`. The file must contain exactly one matching line such as `semver_version='1.2.3'`. Only `X.Y.Z` values match. Everything around `{version}` is literal, including indentation and quotes; this is not a regular expression. Other lines and CRLF endings are preserved when replacing the value. Patterns cannot span lines. Synchronization restores only the generated version, preserving other edits in that file.
+Nested JSON fields use their unique name, not a dotted path. Other fields are kept.
 
-Updates preserve your existing `version_field` setting, including an explicitly empty value.
+For embedded versions, use a literal full-line template, such as `version_field="semver_version='{version}'"`. Exactly one line must match, for example `semver_version='1.2.3'`. Only `X.Y.Z` versions match. Indentation and quotes are literal; templates are not regular expressions and cannot span lines. Replacement keeps other lines and CRLF endings. Synchronization restores only the generated version, keeping other edits in that file.
 
-Nested JSON fields work by their unique name, not a dotted path. Unrelated JSON fields are preserved. Manual version or changelog edits produce a warning and are kept in the commit and push. A manually chosen version must use `X.Y.Z` and becomes the release tag's version. A manually edited changelog is kept as written. These overrides remain in effect for subsequent commits in the same unpublished release; tag notes still collect qualifying commit messages. After publication, automatic updates resume from the published version and changelog. Synchronization preserves manual edits, so conflicts involving those edits require resolution. Commits with no release-triggering changes and no active draft do not regenerate metadata.
+Updates keep your `version_field`, including an explicitly empty value.
 
-Edit shell variables in `.github/workflows/release.conf` to control publishing. This file is retained by `git semver --update`.
+### Manual release edits
+
+Manual version or changelog edits trigger a warning but stay in the commit and push. Versions must use `X.Y.Z` and determine the release tag. Changelogs stay as written. Overrides apply to later commits in the same draft; tag notes still collect qualifying messages.
+
+After publication, automatic updates resume from the published version and changelog. Synchronization keeps manual edits, so conflicts involving them need resolution. Without release-triggering changes or an active draft, commits do not regenerate metadata.
+
+### GitHub publishing
+
+Edit `.github/workflows/release.conf`; updates preserve existing settings.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `RELEASE_BRANCHES` | `main` | Space-separated exact branch names; empty allows all branches. Tag pushes and manual runs bypass this filter. |
+| `RELEASE_BRANCHES` | `main` | Space-separated exact branch names; empty allows all. Tag pushes and manual runs bypass this filter. |
 | `TAG_PREFIX` | `v` | Must match `tag_prefix` in `.githooks/semver.conf`. |
 | `RELEASE_TITLE_PREFIX` | Empty | Text before the tag in release titles. |
-| `UPDATE_LATEST` | `true` | Set to `false` to leave GitHub's Latest selection alone. |
+| `UPDATE_LATEST` | `true` | Set `false` to leave GitHub's Latest selection unchanged. |
 
-The workflow loads the config from the checked-out commit, so commit and push config changes to use them in CI. Older tagged commits without the file use the defaults above. Grouped release notes come from annotated tags. Disable any previous semantic-release job that increments versions or commits release files back to the branch.
+CI reads config from the checked-out commit, so commit and push changes to apply them. Older tags without the file use these defaults. Grouped notes come from annotated tags. Disable previous semantic-release jobs that bump versions or commit release files to the branch.
 
 ## Boundaries
 
-- Release preparation requires a clean working tree, including no untracked files. Commit or stash unrelated work before preparation. A push itself does not alter working files.
-- Configure a tracking upstream matching the push destination. With none configured, preparation uses `origin` and the current branch, then records that tracking configuration for the first ordinary push.
-- Use one matching fetch/push URL. Triangular workflows, custom push refspecs, mirror remotes, multiple push URLs, and unpublished merge commits require manual integration.
-- IDEs that run normal Git hooks also use this workflow. IDEs that bypass hooks are detected by the pre-push readiness check; run `git semver --sync` before pushing.
-- This supports stable versions and configurable Conventional Commit types, not semantic-release's complete plugin API, prerelease channels, or package publishing integrations.
-- Finish recovery with the old hooks before upgrading. Existing unpublished versions generated by an older installation need reconciliation; this tool does not silently strip unknown metadata.
+- Release preparation needs a clean working tree, including no untracked files. Commit or stash unrelated work first. Pushing does not change working files.
+- Use a tracking upstream matching the push destination. Without one, preparation uses `origin` and the current branch, then saves tracking settings for the first ordinary push.
+- Use one matching fetch/push URL. Triangular workflows, custom push refspecs, mirror remotes, multiple push URLs, and unpublished merge commits need manual integration.
+- IDEs must run normal Git hooks. If they bypass commit hooks, pre-push detects missing preparation; run `git semver --sync`.
+- Supports stable versions and configurable Conventional Commit types. Prerelease channels, package publishing integrations, and semantic-release's full plugin API are unsupported.
+- Finish recovery with the old hooks before upgrading. Older unpublished releases need reconciliation; unknown metadata is not silently removed.
