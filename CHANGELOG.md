@@ -2,6 +2,10 @@
 
 All notable changes are documented here automatically by git-semver-hooks.
 
+## 0.24.4
+
+- fix: added batch and shell scripts to simplify the install/update
+
 ## 0.24.3
 
 - fix: removed obsolete version file

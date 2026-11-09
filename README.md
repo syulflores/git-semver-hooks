@@ -1,4 +1,4 @@
-﻿# Git SemVer Hooks
+# Git SemVer Hooks
 
 Automate Conventional Commit releases with Git and its POSIX shell, included with Git for Windows. Version and changelog updates become part of your commit. CI publishes releases without a separate release commit or a follow-up pull. No extra dependencies are needed.
 
@@ -32,16 +32,6 @@ Review and commit the configuration and new files with a `chore:` commit. Instal
 
 Then run `git semver --install` once per clone after adding or pulling the hooks. The global alias silently skips repositories without `.githooks/semver`; it does not activate hooks itself.
 
-On Windows, `activate-semver.bat` sets the global alias and searches Documents, Downloads, Desktop, and OneDrive, including redirected folders. It installs hooks wherever it finds `.githooks/semver`, reports successes, skips, and errors, then asks for another folder. Press Enter to finish.
-
-The batch file works from any location using built-in Windows PowerShell. To search another folder, run:
-
-```bat
-activate-semver.bat "C:\Projects"
-```
-
-Add `-NoPrompt` to skip the final prompt. It replaces a different global `semver` alias, skips `.git`, `node_modules`, and directory links, and installs each repository once per run. Installation or folder-read failures return a nonzero exit code.
-
 Installation enables `post-commit`, `pre-push`, `post-index-change`, annotated-tag pushing, and a recovery-aware `git semver` alias. No wrapper, separate PowerShell script, profile edit, or terminal setup is needed. Install again for each new clone. Git supplies the alias shell even if PowerShell cannot find `sh`.
 
 ## Uninstall
@@ -55,6 +45,53 @@ Finish or abort synchronization first. Uninstall restores the local Git settings
 Older installations without backups remove only recognized local SemVer settings; previous values cannot be restored automatically. Global settings stay unchanged. If a restored or inherited `core.hooksPath=.githooks` would leave hooks active, uninstall disables them locally using `/dev/null` (`nul` on Git for Windows).
 
 Files, commits, tags, and local release records are kept. To remove shared automation, manually remove `.githooks` and `.github/workflows/release.yml`, keeping unrelated hooks and workflow actions. The GitHub workflow stays active until removed. Repeat installation to re-enable hooks.
+
+## SemVer scripts
+
+Use `semver-scripts.bat` on Windows or `semver-scripts.sh` on Linux and macOS. Each is self-contained and offers the same menu for listing, activation, and updating:
+
+```text
+1. List repositories (status and version)
+2. Activate SemVer hooks
+3. Update SemVer hooks
+0. Exit
+```
+
+Both search Documents, Downloads, Desktop, and OneDrive. The Windows script honors redirected folders; the shell script honors Linux desktop redirects through `xdg-user-dir` when available and also searches macOS OneDrive folders under `~/Library/CloudStorage`. Both include OneDrive environment paths when set. After showing results, they ask for another folder; press Enter to return to the menu. Each selection starts a fresh scan.
+
+The batch file works from any location using built-in Windows PowerShell. To search another folder, run:
+
+```bat
+semver-scripts.bat "C:\Projects"
+```
+
+On Linux and macOS, run the shell script with Bash 3.2 or newer and Git on PATH. It works with the Bash included with macOS and does not require an executable bit when invoked this way:
+
+```sh
+bash semver-scripts.sh
+bash semver-scripts.sh "$HOME/Projects"
+bash semver-scripts.sh "$HOME/Projects" --no-prompt
+```
+
+Alternatively, run `chmod +x semver-scripts.sh` once and launch it with `./semver-scripts.sh`. Use an absolute script path when launching from another directory. Both scripts accept `[parent-folder] [--no-prompt]`; a supplied parent folder replaces the default search locations.
+
+Add `--no-prompt` to exit after the selected action without asking for more folders or returning to the menu. The initial menu still appears. Scanning skips `.git`, `node_modules`, and directory links, and processes each repository once per selection. Command or folder-read failures return a nonzero exit code.
+
+**Activate** sets the global alias and runs `git semver --install` in repositories containing `.githooks/semver`. **Update** sets the same alias and runs `git semver --update` in those repositories. Both replace an unrelated global `semver` alias, but report an error instead of executing an unrelated repository-local alias. Results report successes, skips, and errors.
+
+**List** reports repository status without changing Git settings or installing/updating hooks:
+
+- **Activated:** All four scripts (`semver`, `post-commit`, `pre-push`, and `post-index-change`) exist in `.githooks`, the effective `core.hooksPath` points there, and `semver.enabled` is `true`.
+- **Not activated:** All four scripts exist, but the hook path or enabled setting is not active.
+- **Incomplete:** Some required scripts are missing, with other scripts or activation settings present.
+- **Not installed:** None of the four scripts exist and neither activation setting indicates SemVer is active.
+
+On Linux and macOS, **Incomplete** also covers hook files missing executable permission, which Git requires to run them. Status checks configuration and file presence; it does not execute hooks or verify their contents. For activated repositories, the listing also runs `git semver --version` and displays the installed hooks version beside the path. If that command fails or returns nothing, it shows `Version unavailable`, keeps the activation status, and reports an error with a nonzero exit code.
+
+```bat
+semver-scripts.bat
+semver-scripts.bat "C:\Projects" --no-prompt
+```
 
 ## Daily workflow
 

@@ -1,2 +1,3 @@
 .githooks/* text eol=lf
 .github/workflows/release.conf text eol=lf
+semver-scripts.sh text eol=lf
